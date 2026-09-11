@@ -95,10 +95,16 @@ static uint8_t *table_hdr(uint8_t *p, uint8_t id, int count) { p[0] = id; le16(p
 
 int sa_obs_encode(const ap_world_t *w, uint8_t *out, int cap)
 {
-    int i, need = 9 + (3 + SA_PLAYER_STRIDE) + (3 + w->nbullets * SA_BULLET_STRIDE)
-                    + (3 + w->nenemies * SA_ENEMY_STRIDE) + (3 + w->nlasers * SA_LASER_STRIDE);
+    int i, need;
     uint8_t *p = out, *r;
-    if (need > cap || w->nbullets > AP_MAX_BULLETS || w->nenemies > AP_MAX_ENEMIES || w->nlasers > AP_MAX_LASERS) return -1;
+    /* 计数先于 need 校验：need 由它们算出，负数会让 need 缩小甚至变负，
+     * 那样 memset((size_t)need) 就是一次巨量越界写——而这段代码跑在游戏钩子里。 */
+    if (w->nbullets < 0 || w->nbullets > AP_MAX_BULLETS ||
+        w->nenemies < 0 || w->nenemies > AP_MAX_ENEMIES ||
+        w->nlasers  < 0 || w->nlasers  > AP_MAX_LASERS) return -1;
+    need = 9 + (3 + SA_PLAYER_STRIDE) + (3 + w->nbullets * SA_BULLET_STRIDE)
+             + (3 + w->nenemies * SA_ENEMY_STRIDE) + (3 + w->nlasers * SA_LASER_STRIDE);
+    if (need > cap) return -1;
     memset(out, 0, (size_t)need);
     le32(p, w->frame); le32(p + 4, w->phase); p[8] = 4; p += 9;
 
@@ -160,7 +166,7 @@ int sa_act_decode(const uint8_t *p, int n, sa_act_t *out)
 
 int sa_record(uint8_t type, const uint8_t *payload, int len, uint8_t *out, int cap)
 {
-    if (5 + len > cap) return -1;
+    if (len < 0 || 5 + len > cap) return -1;   /* len<0 会让 memcpy 的 (size_t)len 变成天文数字 */
     le32(out, (uint32_t)len + 1); out[4] = type;
     if (len) memcpy(out + 5, payload, (size_t)len);
     return 5 + len;

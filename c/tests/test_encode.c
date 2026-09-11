@@ -66,6 +66,21 @@ int main(void)
     uint8_t rec[32];
     assert(sa_record(3, a, 12, rec, sizeof rec) == 17 && rec[0] == 13 && rec[4] == 3 && rec[5] == 7);
     assert(sa_record(3, a, 12, rec, 10) == -1);
+    /* 负数计数必须被拒：need 会随之缩小甚至变负，memset((size_t)need) 就是一次越界写；
+     * 即便侥幸不炸，table_hdr 也会写出 count=65535 的记录，解码侧一读就报错、整轮训练中断。 */
+    {
+        static ap_world_t bad;
+        memset(&bad, 0, sizeof bad);
+        bad.nbullets = -1;
+        assert(sa_obs_encode(&bad, buf, sizeof buf) == -1);
+        memset(&bad, 0, sizeof bad);
+        bad.nenemies = -1;
+        assert(sa_obs_encode(&bad, buf, sizeof buf) == -1);
+        memset(&bad, 0, sizeof bad);
+        bad.nlasers = -1000000;
+        assert(sa_obs_encode(&bad, buf, sizeof buf) == -1);
+    }
+
     puts("test_encode ok");
     return 0;
 }
