@@ -16,10 +16,16 @@ class Observation:
 
 
 def decode_obs(payload: bytes, hello: Hello) -> Observation:
+    """解码一条 OBS。任何长度不一致都抛 ValueError —— 训练侧会成批读崩溃留下的半截日志，
+    错误类型必须统一可捞（struct.error 不是 ValueError 的子类，会漏网）。"""
+    if len(payload) < _HDR.size:
+        raise ValueError(f"OBS header truncated: {len(payload)} < {_HDR.size} bytes")
     frame, phase, n = _HDR.unpack_from(payload, 0)
     pos = _HDR.size
     tables = {}
     for _ in range(n):
+        if pos + _TBL.size > len(payload):
+            raise ValueError(f"OBS table header truncated at offset {pos}")
         tid, count = _TBL.unpack_from(payload, pos)
         pos += _TBL.size
         t = hello.tables.get(tid)
