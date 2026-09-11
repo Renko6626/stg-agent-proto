@@ -29,6 +29,7 @@ ap_area_t  area;             // 本帧自机可动区（契约坐标系），flo
 int nbullets;  ap_bullet_t bullets[AP_MAX_BULLETS];   // AP_MAX_BULLETS = 640
 int nenemies;  ap_enemy_t  enemies[AP_MAX_ENEMIES];   // AP_MAX_ENEMIES = 256
 int nlasers;   ap_laser_t  lasers[AP_MAX_LASERS];     // AP_MAX_LASERS  = 64
+int nitems;    ap_item_t   items[AP_MAX_ITEMS];       // AP_MAX_ITEMS   = 1024
 ```
 
 `ap_player_t`：`x,y`（位置）、`hit_radius`、`speed`/`speed_focus`（本帧合法步长，正交，
@@ -51,6 +52,9 @@ int nlasers;   ap_laser_t  lasers[AP_MAX_LASERS];     // AP_MAX_LASERS  = 64
 `omega`（绕 `(x,y)` 的角速度，弧度/帧；扫射激光 `omega ≠ 0`）、`vx,vy`（旋转原点的平移速度，
 px/帧；跟着敌人走的激光 `(vx,vy) ≠ 0`；这两个量部分引擎的原结构体里没有，只能由抽取器跨帧
 差分估计）、`t_active`（还要几帧才开始杀人：0 = 现在就杀，>0 = 预警中）、`state`。
+
+`ap_item_t`（掉落物）：`x,y`、`vx,vy`（每帧位移）、`kind`（**契约统一枚举** `AP_ITEM_*`，
+不是后端原值）、`homing`（正朝自机飞来）、`spawning`（生成动画中）。取值与理由见第 3 节。
 
 `ap_area_t`：`xmin,xmax,ymin,ymax`（float，自机可动区，契约坐标系）。
 
@@ -156,7 +160,7 @@ tables [ { id, name, cap, stride, fields [ { name, type, off } ... ] } ... ]
   核对而非派生行为的字符串常量。
 - `actions`：只列出该后端 `action_bits` 里实际置位的动作，按 bit 0→9 顺序；`name` 取自
   第 1 节的动作位表。
-- `tables`：Tier 0 四张表固定都在，`spell` 等后端自定义表可选追加，追加不改变已存在表的
+- `tables`：Tier 0 五张表固定都在，`spell` 等后端自定义表可选追加，追加不改变已存在表的
   `id`/字段。**规则：消费者按字段名字取值，不按顺序；三个后端（th06nc / th18 / stg-engine）
   的 Tier 0 表字段名与类型必须逐字相同**——新增字段允许，改名字/改类型不允许（否则触发
   第 8 节的 proto bump）。
