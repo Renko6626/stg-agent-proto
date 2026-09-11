@@ -3,6 +3,11 @@
 #include <string.h>
 #include "stgagent.h"
 
+/* MSVC / ucrt 的 math.h 不给 M_PI（要先 #define _USE_MATH_DEFINES），交叉编译到 Windows 会断。
+ * 本仓的主要消费者恰恰是 Windows DLL，所以自带常量，不靠编译开关，也不给下游加负担。
+ * 值 = 2π 的最近 double，与 2.0 * M_PI 逐位相同。 */
+#define SA_TWO_PI 6.283185307179586476925286766559
+
 static const sa_field_t PF[] = {
     {"x","fx",P_X},{"y","fx",P_Y},{"hit_radius","fx",P_HIT_R},{"speed","fx",P_SPEED},{"speed_focus","fx",P_SPEED_F},
     {"focus","u8",P_FOCUS},{"state","u8",P_STATE},{"lives","u8",P_LIVES},{"bombs","u8",P_BOMBS},
@@ -36,7 +41,7 @@ int32_t sa_fx(float v)
 }
 uint16_t sa_bam(float rad)
 {
-    long long i = (long long)rint((double)rad * (65536.0 / (2.0 * M_PI)));
+    long long i = (long long)rint((double)rad * (65536.0 / SA_TWO_PI));
     return (uint16_t)(i & 0xFFFF);
 }
 
