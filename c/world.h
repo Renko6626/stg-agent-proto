@@ -33,11 +33,12 @@ typedef struct {
     uint8_t collidable;    /* 引擎本帧会不会拿它撞自机 */
 } ap_enemy_t;
 
-/* 直线激光：从 (x,y) 沿 angle 伸出，致死盒在沿线 [start,end]、半高 half_h 的旋转矩形。
+/* 直线激光：从 (x,y) 沿 angle 伸出，致死盒是沿线 [start,end]、半高 half_h 的旋转矩形。
+ * 判定式（消费者照此实现）：自机绕 (x,y) 旋转 −angle 进激光坐标系，钳到盒内，再比自机半径。
  * 每帧 end += speed，start = max(start, end − start_len)。 */
 typedef struct {
-    float x, y;
-    float angle;           /* 弧度 */
+    float x, y;            /* 旋转原点 */
+    float angle;           /* 弧度，世界方向 (cos, sin) */
     float start, end;
     float start_len;
     float speed;

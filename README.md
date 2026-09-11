@@ -11,7 +11,8 @@
 
 - **游戏侧（C/DLL）**：把 `c/` 加进 include 路径，`#include "world.h"`，把游戏内存填进
   `ap_world_t`，交给编码器写出协议字节。
-- **训练侧（Python）**：`pip install -e .` 装好 `stgagent` 包后，用
+- **训练侧（Python）**：`python3 -m pip install -e '.[dev]'` 装好 `stgagent` 包后（用
+  `python3 -m pip` 而不是 `pip`：两者可能是不同解释器），用
   `stgagent.consts` 里的常量对照协议，或用 `stgagent.log.read_log(path)` 读取
   `.stglog` 日志文件做解码/回放。
 
