@@ -36,6 +36,7 @@ int main(void)
     w.bullets[0].radius = 4.0f; w.bullets[0].state = 1; w.bullets[0].grazed = 1; w.bullets[0].collidable = 1; w.bullets[0].type = 7;
     w.nenemies = 1; w.enemies[0].x = 0.0f; w.enemies[0].y = 100.0f; w.enemies[0].hit_w = 16.0f; w.enemies[0].hit_h = 16.0f;
     w.enemies[0].hp = 500; w.enemies[0].hp_max = 1000; w.enemies[0].boss = 1; w.enemies[0].collidable = 1;
+    w.enemies[0].id = 4242;   /* 后端给的稳定标识，不是行号 */
     w.nlasers = 1; w.lasers[0].x = 50.0f; w.lasers[0].y = 60.0f; w.lasers[0].angle = (float)(M_PI / 2);
     w.lasers[0].start = 0.0f; w.lasers[0].end = 200.0f; w.lasers[0].half_h = 4.0f; w.lasers[0].t_active = 30; w.lasers[0].state = 0;
     w.lasers[0].omega = 0.5f; w.lasers[0].vx = -1.5f; w.lasers[0].vy = 2.0f;
@@ -51,7 +52,7 @@ int main(void)
     assert(buf[51 + 26] == 0x07 && buf[51 + 27] == 1 && rd16(buf + 51 + 28) == 7);
     assert(buf[81] == 3 && rd16(buf + 82) == 1);
     assert((int32_t)rd32(buf + 84 + 8) == 16 * 65536 && (int32_t)rd32(buf + 84 + 24) == 500);
-    assert(rd16(buf + 84 + 32) == 0x11 && rd32(buf + 84 + 34) == 0);
+    assert(rd16(buf + 84 + 32) == 0x11 && rd32(buf + 84 + 34) == 4242);
     assert(buf[122] == 4 && rd16(buf + 123) == 1);
     assert(rd16(buf + 125 + 8) == 16384 && (int32_t)rd32(buf + 125 + 14) == 200 * 65536);
     assert((int32_t)rd32(buf + 125 + 30) == 32768 && (int32_t)rd32(buf + 125 + 34) == -98304   /* omega 0.5、vx −1.5 */

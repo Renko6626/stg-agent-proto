@@ -197,9 +197,12 @@ tables [ { id, name, cap, stride, fields [ { name, type, off } ... ] } ... ]
 | `type` | `u16` | 28 |
 
 派生规则：`speed = hypot(vx, vy)`，`angle = bam(atan2(vy, vx))`——两者都是编码时算出来的，
-`ap_bullet_t` 里没有独立存这两个量。`flags` 位composition：bit0 = `collidable`（引擎本帧会
-不会拿它撞自机），bit1 = **恒为 1**（当前实现里无条件 `| 2`，源码未注释用途，读到即可，
-不要臆测语义），bit2 = `grazed`，其余位为 0。
+`ap_bullet_t` 里没有独立存这两个量。`flags` 位组成：bit0 = `collidable`（引擎本帧会
+不会拿它撞自机），bit1 = **圆形判定**，bit2 = `grazed`，其余位为 0。
+
+bit1 在 v1 恒为 1：`ap_bullet_t` 只能表达圆判定，而 th06nc 的被弹判定本来就全是圆。
+TH18 有非圆弹（引擎侧 `flags & 0x10`），接 TH18 时要先给 `ap_bullet_t` 加字段，
+届时 bit1 才会出现 0。消费者**可以**依赖 bit1 的语义，但不要依赖它恒为 1。
 
 **`enemies`**（`id=3`，`cap=256`，`stride=38`）：
 
@@ -218,10 +221,13 @@ tables [ { id, name, cap, stride, fields [ { name, type, off } ... ] } ... ]
 
 派生规则：`hurt_w`/`hurt_h` 与 `hit_w`/`hit_h` **当前逐字节相同**——都直接来自
 `ap_enemy_t.hit_w`/`hit_h`，编码器没有区分「视觉受击盒」与「判定盒」两套数值，四个字段
-现在总是两两相等，不要指望它们分叉。`flags` 位composition：bit0 = `boss`，bit4（`0x10`）=
-`collidable`，其余位为 0。**`id` 是该敌人在本帧 `enemies[]` 数组里的下标**，不是任何跨帧
-稳定的实体句柄——同一个 `id` 在下一帧可能对应完全不同的敌人（前一个已消失、数组重新排列）。
-需要跨帧追踪同一敌人的消费者不能只靠这个 `id`。
+现在总是两两相等，不要指望它们分叉。`flags` 位组成：bit0 = `boss`，bit4（`0x10`）=
+`collidable`，其余位为 0。
+
+**`id` 是后端给的标识，要求在该敌人存活期间跨帧稳定**——消费者靠它追踪同一个敌人。
+它直接透传 `ap_enemy_t.id`，编码器不代填。各后端的取值：th06nc = 敌池槽下标，
+TH18 = 引擎的 `enemy_id`。槽会在敌人死后被复用，所以 `id` 只在一条生命周期内唯一，
+不是全局永久句柄；要区分「同槽的前后两个敌人」，消费者需结合 `id` 断档与 `hp_max` 变化判断。
 
 **`lasers`**（`id=4`，`cap=64`，`stride=48`）：
 

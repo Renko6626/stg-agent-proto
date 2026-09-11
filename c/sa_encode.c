@@ -127,6 +127,8 @@ int sa_obs_encode(const ap_world_t *w, uint8_t *out, int cap)
         put_fx(r, B_X, b->x); put_fx(r, B_Y, b->y); put_fx(r, B_VX, b->vx); put_fx(r, B_VY, b->vy);
         put_fx(r, B_SPEED, hypotf(b->vx, b->vy)); le16(r + B_ANGLE, sa_bam(atan2f(b->vy, b->vx)));
         put_fx(r, B_RADIUS, b->radius);
+        /* bit0 参与碰撞、bit1 圆形判定、bit2 已擦。bit1 恒 1：ap_bullet_t 只能表达圆判定，
+         * th06nc 本来就全是圆；TH18 有非圆弹（flags & 0x10），接它时要给 ap_bullet_t 加字段。 */
         r[B_FLAGS] = (uint8_t)((b->collidable ? 1 : 0) | 2 | (b->grazed ? 4 : 0));
         r[B_STATE] = b->state; le16(r + B_TYPE, b->type);
     }
@@ -139,7 +141,7 @@ int sa_obs_encode(const ap_world_t *w, uint8_t *out, int cap)
         put_fx(r, E_HURT_W, e->hit_w); put_fx(r, E_HURT_H, e->hit_h); put_fx(r, E_HIT_W, e->hit_w); put_fx(r, E_HIT_H, e->hit_h);
         le32(r + E_HP, (uint32_t)e->hp); le32(r + E_HP_MAX, (uint32_t)e->hp_max);
         le16(r + E_FLAGS, (uint16_t)((e->boss ? 1 : 0) | (e->collidable ? 0x10 : 0)));
-        le32(r + E_ID, (uint32_t)i);
+        le32(r + E_ID, e->id);   /* 后端给的稳定标识，不是行号 */
     }
     p = r;
 

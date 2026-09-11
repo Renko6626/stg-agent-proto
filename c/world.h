@@ -31,6 +31,10 @@ typedef struct {
     int32_t hp, hp_max;
     uint8_t boss;
     uint8_t collidable;    /* 引擎本帧会不会拿它撞自机 */
+    /* 后端给的标识，要求在该敌人**存活期间跨帧稳定**——消费者靠它追踪同一个敌人。
+     * th06nc = 敌池槽下标；TH18 = 引擎的 enemy_id。抽取器必须填，不能留 0 让编码器编行号：
+     * 行号下一帧就对应到别的敌人，是个会让跨帧追踪静默出错的陷阱。 */
+    uint32_t id;
 } ap_enemy_t;
 
 /* 直线激光：从 (x,y) 沿 angle 伸出，致死盒是沿线 [start,end]、半高 half_h 的旋转矩形。
