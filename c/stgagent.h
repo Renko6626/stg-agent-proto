@@ -13,7 +13,8 @@ enum { SA_MSG_HELLO = 1, SA_MSG_OBS = 2, SA_MSG_ACT = 3, SA_MSG_CTRL = 4, SA_MSG
 
 /* 一帧 OBS 的最大字节数：头 9 + 每表 (3 + cap×stride) */
 #define SA_OBS_CAP (9 + (3 + SA_PLAYER_STRIDE) + (3 + AP_MAX_BULLETS * SA_BULLET_STRIDE) \
-                      + (3 + AP_MAX_ENEMIES * SA_ENEMY_STRIDE) + (3 + AP_MAX_LASERS * SA_LASER_STRIDE))
+                      + (3 + AP_MAX_ENEMIES * SA_ENEMY_STRIDE) + (3 + AP_MAX_LASERS * SA_LASER_STRIDE) \
+                      + (3 + AP_MAX_ITEMS * SA_ITEM_STRIDE))
 
 typedef struct {
     const char *backend;      /* "th06nc" / "th18.v1.00a" / … */

@@ -23,11 +23,15 @@ static const sa_field_t LF[] = {
     {"speed","fx",L_SPEED},{"half_h","fx",L_HALF_H},{"omega","fx",L_OMEGA},{"vx","fx",L_VX},{"vy","fx",L_VY},
     {"t_active","i32",L_T_ACTIVE},{"state","u8",L_STATE},{"type","u8",L_TYPE} };
 
-const sa_table_t SA_TABLES[4] = {
+static const sa_field_t IF[] = {
+    {"x","fx",I_X},{"y","fx",I_Y},{"vx","fx",I_VX},{"vy","fx",I_VY},{"kind","u8",I_KIND},{"flags","u8",I_FLAGS} };
+
+const sa_table_t SA_TABLES[5] = {
     { SA_T_PLAYER,  "player",  1,              SA_PLAYER_STRIDE, PF, (int)(sizeof PF / sizeof PF[0]) },
     { SA_T_BULLETS, "bullets", AP_MAX_BULLETS, SA_BULLET_STRIDE, BF, (int)(sizeof BF / sizeof BF[0]) },
     { SA_T_ENEMIES, "enemies", AP_MAX_ENEMIES, SA_ENEMY_STRIDE,  EF, (int)(sizeof EF / sizeof EF[0]) },
     { SA_T_LASERS,  "lasers",  AP_MAX_LASERS,  SA_LASER_STRIDE,  LF, (int)(sizeof LF / sizeof LF[0]) },
+    { SA_T_ITEMS,   "items",   AP_MAX_ITEMS,   SA_ITEM_STRIDE,   IF, (int)(sizeof IF / sizeof IF[0]) },
 };
 
 static const char *ACTION_NAMES[10] = { "UP","DOWN","LEFT","RIGHT","SHOT","BOMB","SLOW","TIMESTOP","CARD_USE","CARD_SWITCH" };
@@ -80,7 +84,7 @@ int sa_hello_json(const sa_desc_t *d, char *out, int cap)
         n = catl(out, cap, n, "{\"bit\":%ld,\"name\":\"", i); n = cat(out, cap, n, ACTION_NAMES[i]); n = cat(out, cap, n, "\"}");
     }
     n = cat(out, cap, n, "],\"tables\":[");
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 5; i++) {
         const sa_table_t *t = &SA_TABLES[i];
         n = cat(out, cap, n, i ? "," : "");
         n = catl(out, cap, n, "{\"id\":%ld,\"name\":\"", t->id); n = cat(out, cap, n, t->name);
@@ -106,12 +110,14 @@ int sa_obs_encode(const ap_world_t *w, uint8_t *out, int cap)
      * 那样 memset((size_t)need) 就是一次巨量越界写——而这段代码跑在游戏钩子里。 */
     if (w->nbullets < 0 || w->nbullets > AP_MAX_BULLETS ||
         w->nenemies < 0 || w->nenemies > AP_MAX_ENEMIES ||
-        w->nlasers  < 0 || w->nlasers  > AP_MAX_LASERS) return -1;
+        w->nlasers  < 0 || w->nlasers  > AP_MAX_LASERS ||
+        w->nitems   < 0 || w->nitems   > AP_MAX_ITEMS) return -1;
     need = 9 + (3 + SA_PLAYER_STRIDE) + (3 + w->nbullets * SA_BULLET_STRIDE)
-             + (3 + w->nenemies * SA_ENEMY_STRIDE) + (3 + w->nlasers * SA_LASER_STRIDE);
+             + (3 + w->nenemies * SA_ENEMY_STRIDE) + (3 + w->nlasers * SA_LASER_STRIDE)
+             + (3 + w->nitems * SA_ITEM_STRIDE);
     if (need > cap) return -1;
     memset(out, 0, (size_t)need);
-    le32(p, w->frame); le32(p + 4, w->phase); p[8] = 4; p += 9;
+    le32(p, w->frame); le32(p + 4, w->phase); p[8] = 5; p += 9;
 
     r = table_hdr(p, SA_T_PLAYER, 1);
     put_fx(r, P_X, w->player.x); put_fx(r, P_Y, w->player.y); put_fx(r, P_HIT_R, w->player.hit_radius);
@@ -153,6 +159,17 @@ int sa_obs_encode(const ap_world_t *w, uint8_t *out, int cap)
         put_fx(r, L_SPEED, l->speed); put_fx(r, L_HALF_H, l->half_h);
         put_fx(r, L_OMEGA, l->omega); put_fx(r, L_VX, l->vx); put_fx(r, L_VY, l->vy);
         le32(r + L_T_ACTIVE, (uint32_t)l->t_active); r[L_STATE] = l->state; r[L_TYPE] = 0;
+    }
+    p = r;
+
+    r = table_hdr(p, SA_T_ITEMS, w->nitems);
+    for (i = 0; i < w->nitems; i++, r += SA_ITEM_STRIDE) {
+        const ap_item_t *it = &w->items[i];
+        put_fx(r, I_X, it->x); put_fx(r, I_Y, it->y);
+        put_fx(r, I_VX, it->vx); put_fx(r, I_VY, it->vy);
+        r[I_KIND] = it->kind;
+        /* bit0 正朝自机飞来、bit1 生成动画中 */
+        r[I_FLAGS] = (uint8_t)((it->homing ? 1 : 0) | (it->spawning ? 2 : 0));
     }
     p = r;
     return (int)(p - out);

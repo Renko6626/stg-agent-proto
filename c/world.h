@@ -14,6 +14,9 @@
 #ifndef AP_MAX_LASERS
 #define AP_MAX_LASERS  64
 #endif
+#ifndef AP_MAX_ITEMS
+#define AP_MAX_ITEMS   1024
+#endif
 
 typedef struct {
     float x, y;            /* 位置 */
@@ -69,6 +72,16 @@ typedef struct {
     uint32_t score, graze;
 } ap_player_t;
 
+/* 掉落物。kind 是**契约统一枚举**（AP_ITEM_*），不是各作原值——各作抽取器负责映射，
+ * 这样同一个模型换作品也认得「这是残机」。原值与映射表写在各作的 engine 文档里。 */
+typedef struct {
+    float x, y;
+    float vx, vy;          /* 每帧位移。生成动画期间是按插值推出的等效速度，照样可外推 */
+    uint8_t kind;          /* AP_ITEM_* */
+    uint8_t homing;        /* 正朝自机飞来（越过自动回收线后全场道具都会这样） */
+    uint8_t spawning;      /* 生成动画中：位置在两点间插值，不走常规重力 */
+} ap_item_t;
+
 typedef struct { float xmin, xmax, ymin, ymax; } ap_area_t;   /* 自机可动区（契约坐标系） */
 
 typedef struct {
@@ -82,6 +95,8 @@ typedef struct {
     ap_enemy_t enemies[AP_MAX_ENEMIES];
     int nlasers;
     ap_laser_t lasers[AP_MAX_LASERS];
+    int nitems;
+    ap_item_t items[AP_MAX_ITEMS];
 } ap_world_t;
 
 #define AP_PHASE_IN_GAME             (1u << 0)
@@ -92,6 +107,16 @@ typedef struct {
 #define AP_PHASE_SPELL_ACTIVE        (1u << 5)
 #define AP_PHASE_PLAYER_CONTROLLABLE (1u << 6)
 #define AP_PHASE_REPLAY_PLAYBACK     (1u << 7)
+
+/* 掉落物种类（契约统一枚举）。各作原值 → 这里的映射由抽取器做。 */
+#define AP_ITEM_UNKNOWN     0
+#define AP_ITEM_POWER       1   /* 小火力 */
+#define AP_ITEM_POINT       2   /* 点数 */
+#define AP_ITEM_BIG_POWER   3   /* 大火力 */
+#define AP_ITEM_BOMB        4   /* 炸弹 */
+#define AP_ITEM_FULL_POWER  5   /* 满火力 */
+#define AP_ITEM_LIFE        6   /* 残机 */
+#define AP_ITEM_CANCEL      7   /* 消弹产生的点数 */
 
 /* 动作位（bit 号）。0–6 与 stg-engine 的 BTN_* 冻结一致。 */
 #define AP_BTN_UP          (1u << 0)
