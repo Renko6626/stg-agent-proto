@@ -20,3 +20,9 @@ def test_flags_and_phase():
     assert consts.ACT_PASSTHROUGH == 1 and consts.ACT_HUMAN == 2
     assert consts.PHASE_IN_GAME == 1 and consts.PHASE_REPLAY_PLAYBACK == 1 << 7
     assert consts.FIELD_TYPES["fx"] == ("<i", "<i4", 4) and consts.ACT_SIZE == 12
+
+
+def test_item_piece_kinds():
+    from stgagent import consts
+    assert consts.ITEM_LIFE_PIECE == 8
+    assert consts.ITEM_BOMB_PIECE == 9

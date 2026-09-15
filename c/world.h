@@ -117,6 +117,8 @@ typedef struct {
 #define AP_ITEM_FULL_POWER  5   /* 满火力 */
 #define AP_ITEM_LIFE        6   /* 残机 */
 #define AP_ITEM_CANCEL      7   /* 消弹产生的点数 */
+#define AP_ITEM_LIFE_PIECE  8   /* 残机碎片 */
+#define AP_ITEM_BOMB_PIECE  9   /* 炸弹碎片 */
 
 /* 动作位（bit 号）。0–6 与 stg-engine 的 BTN_* 冻结一致。 */
 #define AP_BTN_UP          (1u << 0)

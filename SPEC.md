@@ -26,7 +26,7 @@ uint32_t frame;             // 帧号
 uint32_t phase;             // 阶段位掩码，见下表
 ap_player_t player;
 ap_area_t  area;             // 本帧自机可动区（契约坐标系），float xmin,xmax,ymin,ymax
-int nbullets;  ap_bullet_t bullets[AP_MAX_BULLETS];   // AP_MAX_BULLETS = 640
+int nbullets;  ap_bullet_t bullets[AP_MAX_BULLETS];   // AP_MAX_BULLETS = 640（th06nc 默认，可覆盖）
 int nenemies;  ap_enemy_t  enemies[AP_MAX_ENEMIES];   // AP_MAX_ENEMIES = 256
 int nlasers;   ap_laser_t  lasers[AP_MAX_LASERS];     // AP_MAX_LASERS  = 64
 int nitems;    ap_item_t   items[AP_MAX_ITEMS];       // AP_MAX_ITEMS   = 1024
@@ -163,7 +163,9 @@ tables [ { id, name, cap, stride, fields [ { name, type, off } ... ] } ... ]
 - `tables`：Tier 0 五张表固定都在，`spell` 等后端自定义表可选追加，追加不改变已存在表的
   `id`/字段。**规则：消费者按字段名字取值，不按顺序；三个后端（th06nc / th18 / stg-engine）
   的 Tier 0 表字段名与类型必须逐字相同**——新增字段允许，改名字/改类型不允许（否则触发
-  第 8 节的 proto bump）。
+  第 8 节的 proto bump）。**cap 由各后端在 HELLO 声明**：`AP_MAX_*`（640/256/64/1024）只是
+  `c/world.h` 结构体的默认容量（可 `#define` 覆盖），不是契约上限；OBS `count` 为 u16。
+  stg-engine 后端 bullets cap 可配（默认 1024）。
 
 ### Tier 0 表（`c/sa_layout.h` + `c/sa_encode.c`，逐字段照抄）
 
@@ -282,6 +284,8 @@ TH18 = 引擎的 `enemy_id`。槽会在敌人死后被复用，所以 `id` 只�
 | 5 | 满火力 |
 | 6 | 残机 |
 | 7 | 消弹产生的点数 |
+| 8 | 残机碎片 |
+| 9 | 炸弹碎片 |
 
 `flags`：bit0 = 正朝自机飞来（自动回收中），bit1 = 生成动画中。生成动画期间引擎按两点插值移动，
 不走常规重力，`vx`/`vy` 给的是折算出来的等效每帧位移，消费者照常外推即可。
