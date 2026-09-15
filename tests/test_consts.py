@@ -26,3 +26,23 @@ def test_item_piece_kinds():
     from stgagent import consts
     assert consts.ITEM_LIFE_PIECE == 8
     assert consts.ITEM_BOMB_PIECE == 9
+
+
+def test_c_header_and_python_constants_agree():
+    """c/world.h 的 AP_ITEM_* / AP_PHASE_* / AP_BTN_* 与 consts.py 逐项相等（防单边漂移）。"""
+    import re
+    from pathlib import Path
+    header = (Path(__file__).resolve().parents[1] / "c" / "world.h").read_text(encoding="utf-8")
+    items = {m[1]: int(m[2]) for m in re.finditer(r"#define AP_ITEM_(\w+)\s+(\d+)", header)}
+    assert items, "world.h 里应解析到 AP_ITEM_*"
+    for name, value in items.items():
+        assert getattr(consts, f"ITEM_{name}") == value, name
+    shifts = {(m[1], m[2]): int(m[3]) for m in re.finditer(r"#define AP_(PHASE|BTN)_(\w+)\s+\(1u << (\d+)\)", header)}
+    assert shifts, "world.h 里应解析到 AP_PHASE_* / AP_BTN_*"
+    for (kind, name), bit in shifts.items():
+        assert getattr(consts, f"{kind}_{name}") == 1 << bit, f"{kind}_{name}"
+
+
+def test_item_constants_exported_at_package_level():
+    import stgagent
+    assert stgagent.ITEM_LIFE_PIECE == 8 and stgagent.ITEM_CANCEL == 7

@@ -30,6 +30,15 @@ BTN_TIMESTOP = 1 << 7
 BTN_CARD_USE = 1 << 8
 BTN_CARD_SWITCH = 1 << 9
 
+# 掉落物种类（契约统一枚举，镜像 c/world.h 的 AP_ITEM_*；tests/test_consts.py 与 C 头逐项对拍）
+ITEM_UNKNOWN = 0
+ITEM_POWER = 1
+ITEM_POINT = 2
+ITEM_BIG_POWER = 3
+ITEM_BOMB = 4
+ITEM_FULL_POWER = 5
+ITEM_LIFE = 6
+ITEM_CANCEL = 7
 ITEM_LIFE_PIECE = 8
 ITEM_BOMB_PIECE = 9
 

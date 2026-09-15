@@ -300,7 +300,7 @@ payload 结构：
 ```
 u32 frame
 u32 phase
-u8  table_count            // 当前实现恒为 4：Tier 0 四表逐一写头，即使某表 count=0
+u8  table_count            // 当前实现恒为 5：Tier 0 五表逐一写头，即使某表 count=0
 repeat table_count 次:
     u8  id                  // 对应 HELLO tables[].id
     u16 count               // 本帧该表的行数，count ≤ 对应表的 cap
@@ -308,7 +308,7 @@ repeat table_count 次:
 ```
 
 写侧（`sa_obs_encode`）在 `nbullets/nenemies/nlasers/nitems` 越界（负数或超过
-`AP_MAX_BULLETS/ENEMIES/LASERS`）或缓冲区不够大时返回 `-1`，不写任何字节；不做「截断到
+`AP_MAX_BULLETS/ENEMIES/LASERS/ITEMS`）或缓冲区不够大时返回 `-1`，不写任何字节；不做「截断到
 cap」这种静默丢行为。
 
 解码规则（`stgagent.obs.decode_obs`）：
