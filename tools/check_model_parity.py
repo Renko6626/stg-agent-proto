@@ -223,7 +223,7 @@ def main(argv=None) -> int:
         return 1
 
     prev_action = 0
-    compared = mismatch = ties = skipped = uninvertible = 0
+    compared = mismatch = ties = skipped = uninvertible = bombed = 0
     reports = []
 
     for fr in frames:
@@ -246,6 +246,11 @@ def main(argv=None) -> int:
         want = action_buttons(action_id)
 
         compared += 1
+        # 比较时屏蔽 BOMB：模型永远不出这一位（动作表 v1 屏蔽了它），日志里有就是 safety_net
+        # 补的。不屏蔽的话 safety_net=1 录的日志会报出一堆没有解释的分歧。
+        if buttons & BTN_BOMB:
+            bombed += 1
+        buttons &= ~BTN_BOMB
         if want != buttons:
             order = np.argsort(-logits)
             gap = float(logits[order[0]] - logits[order[1]])
@@ -267,6 +272,8 @@ def main(argv=None) -> int:
             prev_action = logged_id
 
     print(f"比对 {compared} 帧 · 跳过 {skipped} 帧（未接管/无 ACT）")
+    if bombed:
+        print(f"（{bombed} 帧带 BOMB 位 —— safety_net 补的，比较时已屏蔽；模型自己从不出这一位）")
     if uninvertible:
         print(f"⚠ {uninvertible} 帧的按钮位不是动作表 v1 能产出的组合 —— 录制时是不是没关 safety_net，"
               f"或者那几帧其实是 builtin 在跑？")
