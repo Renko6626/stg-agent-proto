@@ -2,7 +2,7 @@ CC      ?= gcc
 CFLAGS  ?= -std=gnu99 -O2 -Wall -Wextra -Werror
 XWIN    ?= $(HOME)/.cache/cargo-xwin/xwin
 XCLANG  ?= clang
-SRC     := sa_encode.c sa_log.c
+SRC     := sa_encode.c sa_log.c sa_model.c
 
 build:
 	mkdir -p build
@@ -16,9 +16,13 @@ build/test_log: build tests/test_log.c $(SRC) stgagent.h
 build/write_sample_log: build tests/write_sample_log.c $(SRC) stgagent.h
 	$(CC) $(CFLAGS) -o $@ tests/write_sample_log.c $(SRC) -lm
 
-test-host: build/test_encode build/test_log build/write_sample_log
+build/test_model: build tests/test_model.c sa_model.c sa_model.h world.h
+	$(CC) $(CFLAGS) -o $@ tests/test_model.c sa_model.c -lm
+
+test-host: build/test_encode build/test_log build/write_sample_log build/test_model
 	./build/test_encode
 	./build/test_log
+	./build/test_model
 
 # 只验「能在 Windows 目标上编译」。x64 给 th06nc，x86 给 th18。XCLANG / XWIN 由调用方按机器覆盖。
 cross-%: build
