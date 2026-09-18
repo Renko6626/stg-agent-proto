@@ -224,6 +224,32 @@ static int check_signature(const sa_in_spec_t *specs, char *err, int errcap)
 
 /* ---- 公开接口 ---- */
 
+int sa_onnx_path_is_utf8(const char *path)
+{
+    const unsigned char *p = (const unsigned char *)path;
+
+    while (*p) {
+        unsigned c = *p++, cp;
+        int n;
+        if (c < 0x80) continue;
+        /* 0x80–0xC1 作为首字节一律非法（孤立续字节，以及 C0/C1 那两个 overlong 首字节）；
+         * 0xF5 以上超出 U+10FFFF。 */
+        if (c >= 0xC2 && c <= 0xDF)      { n = 1; cp = c & 0x1Fu; }
+        else if (c >= 0xE0 && c <= 0xEF) { n = 2; cp = c & 0x0Fu; }
+        else if (c >= 0xF0 && c <= 0xF4) { n = 3; cp = c & 0x07u; }
+        else return 0;
+        while (n--) {
+            if ((*p & 0xC0) != 0x80) return 0;
+            cp = (cp << 6) | (*p++ & 0x3Fu);
+        }
+        if (cp > 0x10FFFFu) return 0;
+        if (cp >= 0xD800u && cp <= 0xDFFFu) return 0;   /* 代理区不是合法标量值 */
+        if (c >= 0xE0 && c <= 0xEF && cp < 0x800u) return 0;      /* 3 字节 overlong */
+        if (c >= 0xF0 && cp < 0x10000u) return 0;                 /* 4 字节 overlong */
+    }
+    return 1;
+}
+
 void sa_onnx_set_library(const char *path)
 {
     snprintf(G_lib, sizeof G_lib, "%s", path && *path ? path : SA_ONNX_DEFAULT_LIB);
@@ -251,6 +277,19 @@ int sa_onnx_open(const char *model_path, char *err, int errcap)
     memset(&G, 0, sizeof G);
     memset(&G_in, 0, sizeof G_in);
     memset(G_logits, 0, sizeof G_logits);
+
+    if (!sa_onnx_path_is_utf8(G_lib)) {
+        snprintf(G_err, sizeof G_err,
+                 "ORT 库路径不是合法 UTF-8（调用方传了 ANSI？见 sa_onnx.h 的路径编码契约）");
+        return fail(err, errcap);
+    }
+    if (!sa_onnx_path_is_utf8(model_path)) {
+        snprintf(G_err, sizeof G_err,
+                 "模型路径不是合法 UTF-8（调用方传了 ANSI？见 sa_onnx.h 的路径编码契约）。"
+                 "Windows 上请用 GetModuleFileNameW + WideCharToMultiByte(CP_UTF8) 拼路径，"
+                 "别用 -A 版 API");
+        return fail(err, errcap);
+    }
 
     G.lib = dl_open(G_lib);
     if (!G.lib) {

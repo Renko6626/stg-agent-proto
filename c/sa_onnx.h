@@ -27,6 +27,21 @@
 #define SA_ONNX_DEFAULT_LIB "libonnxruntime.so"
 #endif
 
+/* **路径编码契约：本文件的所有 `const char *` 路径都是 UTF-8。**
+ *
+ * Windows 侧用 `CP_UTF8` 转宽字符再交给 ORT。喂 ANSI（`CP_ACP`）进来的话，非 ASCII 字节会被
+ * **静默**替换成 U+FFFD，拼出一条不存在的路径，而 ORT 只会说「File doesn't exist」——
+ * 2026-09-18 实机就是这么失败的（中文游戏目录 + `GetModuleFileNameA`），错误信息把排错方向
+ * 指反了大半天。所以 `sa_onnx_open` 会先验一遍编码再动手，见 `sa_onnx_path_is_utf8`。
+ *
+ * 调用方在 Windows 上的正确做法：`GetModuleFileNameW` / `GetPrivateProfileStringW` 取宽字符，
+ * 再 `WideCharToMultiByte(CP_UTF8, ...)`。**不要**用 `-A` 版本的 Win32 API 拼路径。
+ * POSIX 上路径原样透传，UTF-8 本来就是常态。 */
+
+/* `path` 是不是合法 UTF-8（严格：拒 overlong、代理区、> U+10FFFF、孤立续字节）。
+ * 纯 ASCII 恒真。空串恒真。宿主可测，负例就是 GBK 中文那类字节。 */
+int sa_onnx_path_is_utf8(const char *path);
+
 /* 覆盖要加载的 ORT 动态库路径（测试与排错用）。`NULL` 恢复默认。只在 `sa_onnx_open` 之前有效。 */
 void sa_onnx_set_library(const char *path);
 

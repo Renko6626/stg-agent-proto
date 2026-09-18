@@ -19,6 +19,39 @@
 
 static ap_world_t W;
 
+/* 路径编码契约（sa_onnx.h）。负例用的是 2026-09-18 实机日志里的**真实字节** ——
+ * GBK 的「整数作」与「东方红魔乡」，当时它们被 CP_UTF8 静默替换成 U+FFFD，
+ * 拼出一条不存在的路径，而 ORT 只说「File doesn't exist」。 */
+static void test_path_utf8_contract(void)
+{
+    /* 真实的 GBK 字节：D:\TouhouProject\整数作stg\... */
+    static const char gbk_real[] = "D:\\TouhouProject\\\xd5\xfb\xca\xfd\xd7\xf7stg\\f-best.onnx";
+    /* 同一条路径的 UTF-8 写法 */
+    static const char utf8_real[] = "D:\\TouhouProject\\整数作stg\\f-best.onnx";
+    char err[512] = "";
+
+    assert(sa_onnx_path_is_utf8("") == 1);
+    assert(sa_onnx_path_is_utf8("f-best.onnx") == 1);
+    assert(sa_onnx_path_is_utf8("D:\\Touhou\\f-best.onnx") == 1);
+    assert(sa_onnx_path_is_utf8(utf8_real) == 1);
+
+    assert(sa_onnx_path_is_utf8(gbk_real) == 0 && "GBK 中文路径必须被判非法");
+    assert(sa_onnx_path_is_utf8("\x80") == 0);                  /* 孤立续字节 */
+    assert(sa_onnx_path_is_utf8("\xc0\xaf") == 0);              /* overlong 的 '/' */
+    assert(sa_onnx_path_is_utf8("\xe0\x80\xaf") == 0);         /* 3 字节 overlong */
+    assert(sa_onnx_path_is_utf8("\xed\xa0\x80") == 0);         /* 代理区 U+D800 */
+    assert(sa_onnx_path_is_utf8("\xf5\x80\x80\x80") == 0);    /* > U+10FFFF */
+    assert(sa_onnx_path_is_utf8("\xe4\xbd") == 0);              /* 截断的多字节序列 */
+    assert(sa_onnx_path_is_utf8("\xf0\x9f\x98\x80") == 1);    /* U+1F600，合法 4 字节 */
+
+    /* open 要在碰 ORT 之前就因为编码失败，且说清是编码问题 —— 这正是当时缺的那句话 */
+    sa_onnx_set_library("./__sa_onnx_no_such_library__.so");
+    assert(sa_onnx_open(gbk_real, err, sizeof err) == 0);
+    assert(strstr(err, "UTF-8") != NULL && strstr(err, "ANSI") != NULL);
+    printf("  path contract: %s\n", err);
+    sa_onnx_set_library(NULL);
+}
+
 static void test_missing_library(void)
 {
     char err[512] = "";
@@ -207,6 +240,7 @@ int main(void)
     const char *bad = getenv("SA_ONNX_TEST_BADMODEL");
     int rc = 0;
 
+    test_path_utf8_contract();
     test_missing_library();
     test_library_without_ort_symbol();
     test_run_without_open();
