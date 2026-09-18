@@ -23,6 +23,16 @@
   `stgagent.consts` 里的常量对照协议，或用 `stgagent.log.read_log(path)` 读取
   `.stglog` 日志文件做解码/回放。
 
+## 工具
+
+```bash
+python3 tools/check_log.py <文件.stglog>          # 给一份日志体检（接新后端后第一件该跑的事）
+python3 tools/check_model_parity.py <文件.stglog> --model f-best.onnx   # onnx 后端的逐帧对拍闸门
+```
+
+对拍闸门抓的是「C 侧接错了」（列序、包络边界、动作表、prev_action 没清），抓不了「模型好不好」。
+录制条件与限制见它的 `--help` 与文件头注释。
+
 ## 怎么测
 
 - Python 侧：`pytest`。

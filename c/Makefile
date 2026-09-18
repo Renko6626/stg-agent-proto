@@ -22,6 +22,11 @@ build/test_model: build tests/test_model.c sa_model.c sa_model.h world.h
 build/test_onnx: build tests/test_onnx.c sa_onnx.c sa_model.c sa_onnx.h sa_model.h vendor/onnxruntime_c_api.h
 	$(CC) $(CFLAGS) -o $@ tests/test_onnx.c sa_onnx.c sa_model.c -lm -ldl
 
+# 对拍夹具：同一批世界，一边录成 .stglog、一边倒出 sa_model_fill 的结果。
+# Python 侧 tests/test_model_parity.py 用它做 C↔Python 的填数组对拍。
+build/dump_model_in: build tests/dump_model_in.c $(SRC) sa_model.h stgagent.h
+	$(CC) $(CFLAGS) -o $@ tests/dump_model_in.c $(SRC) -lm
+
 test-host: build/test_encode build/test_log build/write_sample_log build/test_model build/test_onnx
 	./build/test_encode
 	./build/test_log
