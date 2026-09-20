@@ -15,10 +15,11 @@
  * 玩家机器上恰好装了个稍旧的 onnxruntime.dll 时也不至于直接不认。 */
 #define SA_ONNX_MIN_API 11
 
-#define SA_ONNX_NINPUTS 7
+#define SA_ONNX_NINPUTS 8      /* 上限。版本 2 的图是前 7 个，版本 3 多一个 dir_held */
+#define SA_ONNX_NINPUTS_V2 7
 
 static const char *const IN_NAMES[SA_ONNX_NINPUTS] = {
-    "bullets", "bullets_mask", "enemies", "enemies_mask", "player", "target", "prev_action",
+    "bullets", "bullets_mask", "enemies", "enemies_mask", "player", "target", "prev_action", "dir_held",
 };
 static const char *const OUT_NAMES[1] = { "logits" };
 
@@ -47,6 +48,7 @@ static struct {
     OrtMemoryInfo     *mem;
     OrtValue          *in[SA_ONNX_NINPUTS];
     OrtValue          *out;
+    size_t             nin;      /* 装上的这张图有几个输入：7 = 版本 2，8 = 版本 3（带 dir_held） */
     int                open;
 } G;
 
@@ -63,6 +65,7 @@ static void spec_table(sa_in_spec_t s[SA_ONNX_NINPUTS])
         { F, { SA_MODEL_PLAYER_COLS, 0 },                    1, G_in.player,       sizeof G_in.player },
         { F, { 2, 0 },                                       1, G_in.target,       sizeof G_in.target },
         { I, { 1, 0 },                                       1, G_in.prev_action,  sizeof G_in.prev_action },
+        { I, { 1, 0 },                                       1, G_in.dir_held,     sizeof G_in.dir_held },
     };
     memcpy(s, t, sizeof t);
 }
@@ -205,12 +208,13 @@ static int check_signature(const sa_in_spec_t *specs, char *err, int errcap)
 
     if ((st = G.api->SessionGetInputCount(G.sess, &n)) != NULL)
         return ort_fail(st, err, errcap, "取输入个数失败");
-    if (n != SA_ONNX_NINPUTS) {
-        snprintf(G_err, sizeof G_err, "图签名不符：图有 %d 个输入，应为 %d",
-                 (int)n, SA_ONNX_NINPUTS);
+    if (n != SA_ONNX_NINPUTS_V2 && n != SA_ONNX_NINPUTS) {
+        snprintf(G_err, sizeof G_err, "图签名不符：图有 %d 个输入，应为 %d（图版本 2）或 %d（图版本 3，带 dir_held）",
+                 (int)n, SA_ONNX_NINPUTS_V2, SA_ONNX_NINPUTS);
         return fail(err, errcap);
     }
-    for (i = 0; i < SA_ONNX_NINPUTS; i++)
+    G.nin = n;
+    for (i = 0; i < G.nin; i++)
         if (!check_one_input(i, &specs[i], err, errcap)) return 0;
 
     if ((st = G.api->SessionGetOutputCount(G.sess, &n)) != NULL)
@@ -258,6 +262,8 @@ void sa_onnx_set_library(const char *path)
 int sa_onnx_is_open(void) { return G.open; }
 
 sa_model_in_t *sa_onnx_inputs(void) { return &G_in; }
+
+int sa_onnx_has_held(void) { return G.open && G.nin == SA_ONNX_NINPUTS; }
 
 const char *sa_onnx_last_error(void) { return G_err; }
 
@@ -370,7 +376,7 @@ int sa_onnx_open(const char *model_path, char *err, int errcap)
         release_all();
         return 0;
     }
-    for (i = 0; i < SA_ONNX_NINPUTS; i++) {
+    for (i = 0; i < (int)G.nin; i++) {
         st = G.api->CreateTensorWithDataAsOrtValue(G.mem, specs[i].data, specs[i].bytes,
                                                    specs[i].dims, specs[i].ndim, specs[i].type,
                                                    &G.in[i]);
@@ -409,7 +415,7 @@ const float *sa_onnx_run(void)
         snprintf(G_err, sizeof G_err, "会话未打开");
         return NULL;
     }
-    st = G.api->Run(G.sess, NULL, IN_NAMES, (const OrtValue *const *)G.in, SA_ONNX_NINPUTS,
+    st = G.api->Run(G.sess, NULL, IN_NAMES, (const OrtValue *const *)G.in, G.nin,
                     OUT_NAMES, 1, &G.out);
     if (st != NULL) {
         snprintf(G_err, sizeof G_err, "Run 失败：%.700s", G.api->GetErrorMessage(st));

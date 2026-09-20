@@ -19,6 +19,9 @@ build/write_sample_log: build tests/write_sample_log.c $(SRC) stgagent.h
 build/test_model: build tests/test_model.c sa_model.c sa_model.h world.h
 	$(CC) $(CFLAGS) -o $@ tests/test_model.c sa_model.c -lm
 
+build/test_motor: build tests/test_motor.c sa_motor.c sa_motor.h
+	$(CC) $(CFLAGS) -o $@ tests/test_motor.c sa_motor.c
+
 build/test_onnx: build tests/test_onnx.c sa_onnx.c sa_model.c sa_onnx.h sa_model.h vendor/onnxruntime_c_api.h
 	$(CC) $(CFLAGS) -o $@ tests/test_onnx.c sa_onnx.c sa_model.c -lm -ldl
 
@@ -27,7 +30,8 @@ build/test_onnx: build tests/test_onnx.c sa_onnx.c sa_model.c sa_onnx.h sa_model
 build/dump_model_in: build tests/dump_model_in.c $(SRC) sa_model.h stgagent.h
 	$(CC) $(CFLAGS) -o $@ tests/dump_model_in.c $(SRC) -lm
 
-test-host: build/test_encode build/test_log build/write_sample_log build/test_model build/test_onnx
+test-host: build/test_encode build/test_log build/write_sample_log build/test_model build/test_motor build/test_onnx
+	./build/test_motor
 	./build/test_encode
 	./build/test_log
 	./build/test_model

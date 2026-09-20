@@ -10,7 +10,7 @@
 
 **录制条件**（不满足闸门就没有意义）：
 
-    policy = onnx · safety_net = 0 · BYPASS 模式（鼠标不参与）· anchor = under_boss
+    policy = onnx · safety_net = 0 · BYPASS 模式（鼠标不参与）· `--anchor` = ini 的 bypass_anchor（默认 free）
 
 `.stglog` 里**没有锚点这一路信息**（协议里没有这个字段），所以锚点必须是世界状态的确定性函数，
 且这里的 `--anchor` 要与录制时 ini 的 `anchor` 一致 —— 由人保证。`safety_net = 1` 录的日志里
@@ -18,7 +18,7 @@
 
 用法：
 
-    python3 tools/check_model_parity.py <日志.stglog> --model f-best.onnx [--anchor under_boss]
+    python3 tools/check_model_parity.py <日志.stglog> --model j-best.onnx [--anchor under_boss]
                                         [--anchor-y 384] [--hysteresis 0] [--eps 1e-3]
 
 退出码 0 = 全帧一致（或不一致都在浮点近平局内）；1 = 有真正的分歧。
@@ -44,13 +44,16 @@ from stgagent.fixed import fx_to_float
 
 # ---- 图签名与口径，逐项对着 c/sa_model.h ----
 BULLET_ROWS, BULLET_COLS = 640, 5
-ENEMY_ROWS, ENEMY_COLS = 256, 4
+ENEMY_ROWS, ENEMY_COLS = 256, 6      # x, y, hit_w, boss, vx, vy（图版本 2）
+TELEPORT_PX = 16.0                    # = SA_MODEL_TELEPORT_PX
 PLAYER_COLS = 5
 NUM_ACTIONS = 18
 ENV_HALF_W, ENV_Y_MIN, ENV_Y_MAX = 256.0, -64.0, 512.0
 FIELD_HALF_W = 192.0
 ANCHOR_MARGIN = 16.0
 INPUT_NAMES = ("bullets", "bullets_mask", "enemies", "enemies_mask", "player", "target", "prev_action")
+HELD_INPUT = "dir_held"               # 只有图版本 3（手部运动层下练的模型）才有
+HELD_NEVER = 1 << 20                  # = SA_MOTOR_HELD_NEVER
 
 BULLET_FLAG_COLLIDABLE = 0x01
 ENEMY_FLAG_BOSS = 0x01
@@ -105,6 +108,9 @@ def pick(logits, prev_action: int, hysteresis: float) -> int:
 def anchor(obs, mode: str, anchor_x: float, anchor_y: float) -> tuple:
     """与 policy_model.c 的 ap_policy_model_anchor 同义（不含鼠标那一档 —— 无从复现）。"""
     lim = max(0.0, FIELD_HALF_W - ANCHOR_MARGIN)
+    if mode == "free":                       # 无目标点：锚点锁自机，不钳、不用 anchor_y
+        p = obs.tables["player"][0]
+        return float(fx_to_float(p["x"])), float(fx_to_float(p["y"]))
     if mode == "fixed":
         x = anchor_x
     elif mode == "under_boss":
@@ -121,10 +127,65 @@ def anchor(obs, mode: str, anchor_x: float, anchor_y: float) -> tuple:
     return float(np.clip(x, -lim, lim)), float(anchor_y)
 
 
-def fill_inputs(obs, target, prev_action: int) -> dict:
+class EnemyTrack:
+    """敌人速度的跨帧状态，与 c/sa_model.h 的 `sa_model_track_t` 同义。
+
+    记的是上一次 `fill_inputs` 看到的**全部**敌人（不论 collidable）的 id → 坐标；
+    id 重复时留池序最前那只（C 侧 `track_find` 的线性查找也是先到先得）。
+    """
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.frame = None
+        self.pos = {}
+
+    def velocity(self, frame: int, ids, x, y):
+        """当前帧每只敌的 (vx, vy)。对不上 / 断帧 / 任一轴位移 > TELEPORT_PX 记 0。"""
+        v = np.zeros((len(ids), 2), dtype=np.float32)
+        if self.frame is not None and frame == (self.frame + 1) & 0xFFFFFFFF:
+            for i, k in enumerate(ids):
+                prev = self.pos.get(int(k))
+                if prev is None:
+                    continue
+                dx, dy = np.float32(x[i]) - prev[0], np.float32(y[i]) - prev[1]
+                if abs(dx) <= TELEPORT_PX and abs(dy) <= TELEPORT_PX:
+                    v[i] = (dx, dy)
+        return v
+
+    def update(self, frame: int, ids, x, y):
+        self.pos = {}
+        for i, k in enumerate(ids):
+            self.pos.setdefault(int(k), (np.float32(x[i]), np.float32(y[i])))
+        self.frame = frame
+
+
+def next_held(prev_action: int, action: int, held: int) -> int:
+    """与 c/sa_motor.c 的 sa_motor_next_held 同义：方向换了 → 1，否则 +1（封顶）。"""
+    if prev_action // 2 != action // 2:
+        return 1
+    return min(held + 1, HELD_NEVER)
+
+
+def parse_motor(spec: str):
+    """`--motor`：off → None；`hold=a,b[;delay=c,d]` → (hold_hi, delay_hi)，只用得到上界。"""
+    if spec == "off":
+        return None
+    got = {"hold": (0, 0), "delay": (0, 0)}
+    for part in spec.split(";"):
+        key, _, val = part.partition("=")
+        lo, hi = (int(v) for v in val.split(","))
+        got[key.strip()] = (lo, hi)
+    return got["hold"][1], got["delay"][1]
+
+
+def fill_inputs(obs, target, prev_action: int, track: "EnemyTrack | None" = None,
+                dir_held: int = HELD_NEVER) -> dict:
     """OBS 的表 → 图的七个输入。与 c/sa_model.c 的 sa_model_fill **逐条同口径**。
 
     这是一份独立重写，不是抄 C 的结果 —— 两边各自算、对拍才有意义。
+    `track` 为 None 时敌人速度两列恒 0（与 C 侧传 NULL 同义）。
     """
     bullets = np.zeros((BULLET_ROWS, BULLET_COLS), dtype=np.float32)
     bmask = np.zeros(BULLET_ROWS, dtype=bool)
@@ -147,13 +208,21 @@ def fill_inputs(obs, target, prev_action: int) -> dict:
     e = obs.tables.get("enemies")
     if e is not None and len(e):
         flags = np.asarray(e["flags"])
+        ex = np.asarray(fx_to_float(e["x"]), dtype=np.float32)
+        ey = np.asarray(fx_to_float(e["y"]), dtype=np.float32)
+        ids = np.asarray(e["id"])
         idx = np.flatnonzero((flags & ENEMY_FLAG_COLLIDABLE) != 0)[:ENEMY_ROWS]
         n = len(idx)
-        enemies[:n, 0] = fx_to_float(e["x"][idx])
-        enemies[:n, 1] = fx_to_float(e["y"][idx])
+        enemies[:n, 0] = ex[idx]
+        enemies[:n, 1] = ey[idx]
         enemies[:n, 2] = fx_to_float(e["hit_w"][idx])
         enemies[:n, 3] = ((flags[idx] & ENEMY_FLAG_BOSS) != 0).astype(np.float32)
+        if track is not None:
+            enemies[:n, 4:6] = track.velocity(obs.frame, ids, ex, ey)[idx]
+            track.update(obs.frame, ids, ex, ey)
         emask[:n] = True
+    elif track is not None:
+        track.update(obs.frame, [], [], [])
 
     p = obs.tables["player"][0]
     player = np.array([
@@ -168,20 +237,21 @@ def fill_inputs(obs, target, prev_action: int) -> dict:
         "player": player,
         "target": np.asarray(target, dtype=np.float32),
         "prev_action": np.array([max(0, min(NUM_ACTIONS - 1, int(prev_action)))], dtype=np.int64),
+        HELD_INPUT: np.array([max(0, int(dir_held))], dtype=np.int64),
     }
 
 
 def check_signature(sess) -> list:
-    """图的输入签名要与本文件的常量相符 —— 装错版本的图应当在这里就被拦住。"""
+    """图的输入签名要与本文件的常量相符 —— 装错版本的图应当在这里就被拦住。七输入 = 图版本 2，八输入 = 版本 3。"""
     want = {
         "bullets": (BULLET_ROWS, BULLET_COLS), "bullets_mask": (BULLET_ROWS,),
         "enemies": (ENEMY_ROWS, ENEMY_COLS), "enemies_mask": (ENEMY_ROWS,),
-        "player": (PLAYER_COLS,), "target": (2,), "prev_action": (1,),
+        "player": (PLAYER_COLS,), "target": (2,), "prev_action": (1,), HELD_INPUT: (1,),
     }
     bad = []
     got = {i.name: tuple(i.shape) for i in sess.get_inputs()}
-    if tuple(got) != INPUT_NAMES:
-        bad.append(f"输入名/顺序是 {tuple(got)}，应为 {INPUT_NAMES}")
+    if tuple(got) not in (INPUT_NAMES, INPUT_NAMES + (HELD_INPUT,)):
+        bad.append(f"输入名/顺序是 {tuple(got)}，应为 {INPUT_NAMES}（图版本 2）或再加 {HELD_INPUT}（图版本 3）")
     for name, shape in want.items():
         if name in got and got[name] != shape:
             bad.append(f"输入 {name} 形状是 {got[name]}，应为 {shape}")
@@ -192,13 +262,18 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="onnx 策略后端的逐帧对拍")
     ap.add_argument("log")
     ap.add_argument("--model", required=True, help=".onnx 图（与 DLL 里装的那份同一个文件）")
-    ap.add_argument("--anchor", default="under_boss", choices=("under_boss", "field_bottom", "fixed"),
-                    help="必须与录制时 ini 的 anchor 一致 —— 日志里没有这一路信息")
+    ap.add_argument("--anchor", default="under_boss", choices=("under_boss", "field_bottom", "fixed", "free"),
+                    help="必须与录制时**实际生效**的那一档一致（BYPASS 模式看 ini 的 bypass_anchor，默认 free）"
+                         " —— 日志里没有这一路信息")
     ap.add_argument("--anchor-x", type=float, default=0.0)
     ap.add_argument("--anchor-y", type=float, default=384.0)
     ap.add_argument("--hysteresis", type=float, default=0.0, help="必须与录制时的 hysteresis_pct/100 一致")
     ap.add_argument("--eps", type=float, default=1e-3,
                     help="不一致帧允许的 top-2 logit 差上限：小于它算浮点近平局，不算分歧")
+    ap.add_argument("--motor", default="off",
+                    help="录制时 DLL 的手部运动层：off（严格逐帧比）/ hold=a,b[;delay=c,d]（与 ini 一致）。"
+                         "开着运动层时日志里只有**执行的**动作、没有模型**想按的**，方向分歧只能判「运动层解释得了 / 解释不了」；"
+                         "要严格对拍请用 motor = 0 录")
     ap.add_argument("--max-report", type=int, default=20)
     a = ap.parse_args(argv)
 
@@ -222,7 +297,13 @@ def main(argv=None) -> int:
             print(f"❌ {m}")
         return 1
 
-    prev_action = 0
+    names = tuple(i.name for i in sess.get_inputs())
+    motor = parse_motor(a.motor)
+    print(f"图版本 {'3（带 dir_held）' if HELD_INPUT in names else '2'} · 运动层 {a.motor}")
+    prev_action, held = 0, HELD_NEVER
+    explained = run_len = 0
+    run_want = -1
+    track = EnemyTrack()
     compared = mismatch = ties = skipped = uninvertible = bombed = 0
     reports = []
 
@@ -235,13 +316,15 @@ def main(argv=None) -> int:
         # DLL 没接管的帧（回放 / 不可操作 / MANUAL）：它同时把 prev_action 清了，这里照做。
         if (flags & (ACT_PASSTHROUGH | ACT_HUMAN)) or (fr.obs.phase & PHASE_REPLAY_PLAYBACK) \
                 or not (fr.obs.phase & PHASE_PLAYER_CONTROLLABLE):
-            prev_action = 0
+            prev_action, held = 0, HELD_NEVER
+            run_len, run_want = 0, -1
+            track.reset()          # DLL 的 ap_policy_model_reset 连敌人速度的跨帧状态一起清
             skipped += 1
             continue
 
         target = anchor(fr.obs, a.anchor, a.anchor_x, a.anchor_y)
-        feed = fill_inputs(fr.obs, target, prev_action)
-        logits = sess.run(["logits"], {k: feed[k] for k in INPUT_NAMES})[0].astype(np.float64)
+        feed = fill_inputs(fr.obs, target, prev_action, track, dir_held=held)
+        logits = sess.run(["logits"], {k: feed[k] for k in names})[0].astype(np.float64)
         action_id = pick(logits, prev_action, a.hysteresis)
         want = action_buttons(action_id)
 
@@ -251,7 +334,19 @@ def main(argv=None) -> int:
         if buttons & BTN_BOMB:
             bombed += 1
         buttons &= ~BTN_BOMB
-        if want != buttons:
+        logged = buttons_to_action(buttons)
+        by_motor = False
+        if motor is not None and want != buttons and logged is not None and logged % 2 == action_id % 2:
+            # 低速位一致、只有方向不同：运动层可能把变向挡住了。解释得了的条件（保守）：
+            # 这一段还没执行满最长的最短保持，或者同一个意图被延迟的帧数还在延迟上界之内。
+            run_len = run_len + 1 if run_want == action_id // 2 else 1
+            run_want = action_id // 2
+            by_motor = logged // 2 == prev_action // 2 and (held < motor[0] or run_len <= motor[1])
+        else:
+            run_len, run_want = 0, -1
+        if by_motor:
+            explained += 1
+        elif want != buttons:
             order = np.argsort(-logits)
             gap = float(logits[order[0]] - logits[order[1]])
             if gap < a.eps:
@@ -267,9 +362,9 @@ def main(argv=None) -> int:
         logged_id = buttons_to_action(buttons)
         if logged_id is None:
             uninvertible += 1
-            prev_action = action_id      # 反推不出来只能退回重算值
-        else:
-            prev_action = logged_id
+            logged_id = action_id        # 反推不出来只能退回重算值
+        held = next_held(prev_action, logged_id, held)
+        prev_action = logged_id
 
     print(f"比对 {compared} 帧 · 跳过 {skipped} 帧（未接管/无 ACT）")
     if bombed:
@@ -277,7 +372,9 @@ def main(argv=None) -> int:
     if uninvertible:
         print(f"⚠ {uninvertible} 帧的按钮位不是动作表 v1 能产出的组合 —— 录制时是不是没关 safety_net，"
               f"或者那几帧其实是 builtin 在跑？")
-    print(f"一致 {compared - mismatch - ties} · 近平局 {ties} · **分歧 {mismatch}**")
+    if motor is not None:
+        print(f"（{explained} 帧 = {explained / max(compared, 1):.1%} 的方向分歧由运动层解释：模型想换、手还锁着 / 还在延迟里）")
+    print(f"一致 {compared - mismatch - ties - explained} · 近平局 {ties} · **分歧 {mismatch}**")
     for line in reports:
         print(line)
     if mismatch > len(reports):

@@ -28,11 +28,26 @@ static int in_envelope(float x, float y)
         && y >= SA_MODEL_ENV_Y_MIN && y <= SA_MODEL_ENV_Y_MAX;
 }
 
+void sa_model_track_reset(sa_model_track_t *t) { t->valid = 0; t->n = 0; }
+
+/* 上一帧里 id 相同的那只的下标，没有返回 −1。敌池最多 256、场上通常十几只，线性找就够。
+ * 先试同下标：抽取器按池序收，绝大多数帧同一只敌就在同一行。 */
+static int track_find(const sa_model_track_t *t, int hint, uint32_t id)
+{
+    int j;
+    if (hint < t->n && t->id[hint] == id) return hint;
+    for (j = 0; j < t->n; j++)
+        if (t->id[j] == id) return j;
+    return -1;
+}
+
+static float fabs_f(float v) { return v < 0.0f ? -v : v; }
+
 sa_model_fill_t sa_model_fill(const ap_world_t *w, float target_x, float target_y,
-                              int prev_action, sa_model_in_t *in)
+                              int prev_action, int dir_held, sa_model_track_t *track, sa_model_in_t *in)
 {
     sa_model_fill_t st;
-    int i, nb, ne, row;
+    int i, nb, ne, row, have_prev;
 
     st.bullets = st.enemies = st.bullets_dropped = 0;
     memset(in, 0, sizeof *in);
@@ -48,6 +63,7 @@ sa_model_fill_t sa_model_fill(const ap_world_t *w, float target_x, float target_
     in->target[0] = target_x;
     in->target[1] = target_y;
     in->prev_action[0] = (prev_action >= 0 && prev_action < SA_MODEL_ACTIONS) ? prev_action : 0;
+    in->dir_held[0] = dir_held > 0 ? dir_held : 0;
 
     nb = clamp_count(w->nbullets, AP_MAX_BULLETS);
     for (i = 0, row = 0; i < nb; i++) {
@@ -70,6 +86,7 @@ sa_model_fill_t sa_model_fill(const ap_world_t *w, float target_x, float target_
     /* 敌人**不按位置过滤**：训练侧 enemies_mask 只看行数与 collidable
      * （stg-engine 的敌人越界边距是 256，实际上不构成过滤），这里照样。 */
     ne = clamp_count(w->nenemies, AP_MAX_ENEMIES);
+    have_prev = track && track->valid && w->frame == track->frame + 1u;
     for (i = 0, row = 0; i < ne; i++) {
         const ap_enemy_t *e = &w->enemies[i];
         float *dst;
@@ -78,13 +95,38 @@ sa_model_fill_t sa_model_fill(const ap_world_t *w, float target_x, float target_
         dst = in->enemies + (size_t)row * SA_MODEL_ENEMY_COLS;
         dst[0] = e->x;
         dst[1] = e->y;
-        /* hit_h 不进图：danger_topk_v2 把敌人当成半径 hit_w 的圆（迁移差异登记 §9 第 2 条）。 */
+        /* hit_h 不进图：danger_topk 把敌人当成半径 hit_w 的圆（迁移差异登记 §9 第 2 条）。 */
         dst[2] = e->hit_w;
         dst[3] = e->boss ? 1.0f : 0.0f;
+        /* 速度 = 对上一帧同 id 那只的位移（训练仓 envwrap.enemy_velocity，frame_skip = 1）。
+         * memset 已经把这两列清零，对不上 / 断帧 / 瞬移都落在「保持 0」上。 */
+        if (have_prev) {
+            int j = track_find(track, i, e->id);
+            if (j >= 0) {
+                float dx = e->x - track->x[j], dy = e->y - track->y[j];
+                if (fabs_f(dx) <= SA_MODEL_TELEPORT_PX && fabs_f(dy) <= SA_MODEL_TELEPORT_PX) {
+                    dst[4] = dx;
+                    dst[5] = dy;
+                }
+            }
+        }
         in->enemies_mask[row] = 1;
         row++;
     }
     st.enemies = row;
+
+    /* 记下本帧**全部**敌人（不论 collidable）：出生动画里的敌下一帧变成可碰撞时，
+     * 训练侧照样有它上一帧的坐标（env 的敌表不按 collidable 过滤，掩码是另一回事）。 */
+    if (track) {
+        for (i = 0; i < ne; i++) {
+            track->id[i] = w->enemies[i].id;
+            track->x[i] = w->enemies[i].x;
+            track->y[i] = w->enemies[i].y;
+        }
+        track->n = ne;
+        track->frame = w->frame;
+        track->valid = 1;
+    }
 
     return st;
 }

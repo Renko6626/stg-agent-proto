@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 C_DIR = ROOT / "c"
 
 BULLET_ROWS, BULLET_COLS = 640, 5
-ENEMY_ROWS, ENEMY_COLS = 256, 4
+ENEMY_ROWS, ENEMY_COLS = 256, 6
 PLAYER_COLS = 5
 
 
@@ -48,14 +48,14 @@ def dump(tmp_path_factory):
 def _read_dump(path):
     """按 dump_model_in.c 头部注释的顺序逐块读回来。"""
     raw = path.read_bytes()
-    head = struct.Struct("<2fqii")
+    head = struct.Struct("<2fqqii")
     per = (head.size + BULLET_ROWS * BULLET_COLS * 4 + BULLET_ROWS
            + ENEMY_ROWS * ENEMY_COLS * 4 + ENEMY_ROWS + PLAYER_COLS * 4)
     assert len(raw) % per == 0, f"文件大小 {len(raw)} 不是每帧 {per} 字节的整数倍"
     out = []
     for k in range(len(raw) // per):
         o = k * per
-        tx, ty, prev, nb, ne = head.unpack_from(raw, o)
+        tx, ty, prev, held, nb, ne = head.unpack_from(raw, o)
         o += head.size
 
         def take(count, dtype):
@@ -69,7 +69,7 @@ def _read_dump(path):
         enemies = take(ENEMY_ROWS * ENEMY_COLS, "<f4").reshape(ENEMY_ROWS, ENEMY_COLS)
         emask = take(ENEMY_ROWS, "u1").astype(bool)
         player = take(PLAYER_COLS, "<f4")
-        out.append({"target": (tx, ty), "prev_action": prev, "nb": nb, "ne": ne,
+        out.append({"target": (tx, ty), "prev_action": prev, "dir_held": held, "nb": nb, "ne": ne,
                     "bullets": bullets, "bullets_mask": bmask,
                     "enemies": enemies, "enemies_mask": emask, "player": player})
     return out
@@ -79,10 +79,12 @@ def test_python_fill_matches_c_fill(dump):
     log, bin_ = dump
     _hello, frames = read_log(log)
     want = _read_dump(bin_)
-    assert len(frames) == len(want) == 6, "夹具应有 6 个场景"
+    assert len(frames) == len(want) == 9, "夹具应有 9 个场景"
 
+    track = TOOL.EnemyTrack()      # 整个序列共用一份：敌人速度是跨帧（= 跨场景）差分的
     for k, (fr, w) in enumerate(zip(frames, want)):
-        got = TOOL.fill_inputs(fr.obs, w["target"], int(w["prev_action"]))
+        got = TOOL.fill_inputs(fr.obs, w["target"], int(w["prev_action"]), track, dir_held=int(w["dir_held"]))
+        assert got["dir_held"][0] == w["dir_held"] == ((1 << 20) if k == 5 else 1 + 3 * k)
         assert int(got["bullets_mask"].sum()) == w["nb"], f"场景 {k}：弹行数不符"
         assert int(got["enemies_mask"].sum()) == w["ne"], f"场景 {k}：敌行数不符"
         for key in ("bullets", "bullets_mask", "enemies", "enemies_mask", "player"):
@@ -105,6 +107,18 @@ def test_fixture_actually_exercises_every_rule(dump):
     assert all(f["player"][3] == 4.0 for f in w)
     # 敌人第三列是 hit_w（16）而不是 hit_h（24）
     assert w[3]["enemies"][0][2] == 16.0
+    # 敌人速度：场景 4 的 id 1 从场景 3 跳了 140 px → 瞬移守卫记 0
+    assert tuple(w[4]["enemies"][0][4:6]) == (0.0, 0.0)
+    assert not w[6]["enemies"][:, 4:6].any(), "场景 6：上一帧没有这些 id，速度全 0"
+    assert [tuple(r[4:6]) for r in w[7]["enemies"][:4]] == [(2.5, 0.0), (-1.5, 3.0), (0.0, 2.0), (0.0, 0.0)]
+    assert [tuple(r[4:6]) for r in w[8]["enemies"][:2]] == [(16.0, 0.0), (0.0, 0.0)], "瞬移守卫两侧"
+
+
+def test_no_track_means_zero_velocity(dump):
+    log, _bin = dump
+    _hello, frames = read_log(log)
+    got = TOOL.fill_inputs(frames[7].obs, (0.0, 384.0), 0)
+    assert not got["enemies"][:, 4:6].any()
 
 
 def test_action_table_matches_c_and_training_repo():

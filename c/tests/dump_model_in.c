@@ -9,9 +9,12 @@
  * 口径分叉的（列序写反、包络边界差一、speed 取了 focus 档，都能各自自洽）。
  *
  * .bin 的格式：每帧顺序写下面几块，不写结构体本身（免得受 padding 影响）——
- *   float target[2] · int64 prev_action · int32 nb · int32 ne
+ *   float target[2] · int64 prev_action · int64 dir_held · int32 nb · int32 ne
  *   float bullets[640*5] · uint8 bullets_mask[640]
- *   float enemies[256*4] · uint8 enemies_mask[256] · float player[5] */
+ *   float enemies[256*6] · uint8 enemies_mask[256] · float player[5]
+ *
+ * 场景的 `frame` = 场景号，所以**相邻场景就是相邻帧**：敌人速度（按 id 跨帧差分）是跨场景算的，
+ * 整个序列共用一个 `sa_model_track_t`。场景 3→4 的 id 1 一帧跳了 140 px，正好是瞬移守卫的样本。 */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +23,7 @@
 
 static ap_world_t    W;
 static sa_model_in_t IN;
+static sa_model_track_t TRACK;
 
 static void base_world(uint32_t frame)
 {
@@ -103,12 +107,30 @@ static void scenario(int k, float *ax, float *ay, int *prev)
             put_bullet(i, (float)((i % 96) * 4 - 190), (float)((i / 96) * 40 + 20),
                        0.0f, 1.5f, 2.0f, 1);
         break;
+    case 6:                                  /* 速度的「上一帧」：三只敌，其中一只还在出生动画里 */
+        put_enemy(0, -40.0f, 100.0f, 16.0f, 16.0f, 1, 1);
+        put_enemy(1,  60.0f,  50.0f,  8.0f,  8.0f, 0, 1);
+        put_enemy(2,   0.0f,  20.0f,  8.0f,  8.0f, 0, 0);
+        *prev = 3;
+        break;
+    case 7:                                  /* 紧接场景 6：横移 / 俯冲 / 刚变可碰撞 / 新出现 */
+        put_enemy(0, -37.5f, 100.0f, 16.0f, 16.0f, 1, 1);   /* (+2.5, 0) */
+        put_enemy(1,  58.5f,  53.0f,  8.0f,  8.0f, 0, 1);   /* (−1.5, +3) */
+        put_enemy(2,   0.0f,  22.0f,  8.0f,  8.0f, 0, 1);   /* (0, +2)：上一帧不可碰撞也要有速度 */
+        put_enemy(3, 150.0f,  10.0f,  8.0f,  8.0f, 0, 1);   /* 新出现：0 */
+        *prev = 4;
+        break;
+    case 8:                                  /* 紧接场景 7：瞬移守卫两侧（16 留、16.25 剔） */
+        put_enemy(0, -21.5f, 100.0f, 16.0f, 16.0f, 1, 1);   /* dx = +16 */
+        put_enemy(1,  58.5f,  69.25f, 8.0f,  8.0f, 0, 1);   /* dy = +16.25 → 0 */
+        *prev = 4;
+        break;
     default:
         break;
     }
 }
 
-#define NSCEN 6
+#define NSCEN 9
 
 static void wr(FILE *f, const void *p, size_t n)
 {
@@ -142,11 +164,12 @@ int main(int argc, char **argv)
         float ax, ay;
         int prev, id;
         sa_model_fill_t st;
-        int64_t prev64;
+        int64_t prev64, held64;
+        int held = k == 5 ? (1 << 20) : 1 + 3 * k;   /* 1, 4, 7, …；场景 5 取「新局 = 很大」 */
         int32_t nb, ne;
 
         scenario(k, &ax, &ay, &prev);
-        st = sa_model_fill(&W, ax, ay, prev, &IN);
+        st = sa_model_fill(&W, ax, ay, prev, held, &TRACK, &IN);
         /* ACT 里写「假设模型选了 prev」的按钮位：Python 侧不比这个，只用来让日志成形。 */
         id = prev;
         sa_log_frame(&W, sa_model_buttons(id), 0);
@@ -156,6 +179,8 @@ int main(int argc, char **argv)
         ne = (int32_t)st.enemies;
         wr(bin, IN.target, sizeof IN.target);
         wr(bin, &prev64, sizeof prev64);
+        held64 = IN.dir_held[0];
+        wr(bin, &held64, sizeof held64);
         wr(bin, &nb, sizeof nb);
         wr(bin, &ne, sizeof ne);
         wr(bin, IN.bullets, sizeof IN.bullets);

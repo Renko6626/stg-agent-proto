@@ -46,11 +46,16 @@ int sa_onnx_path_is_utf8(const char *path);
 void sa_onnx_set_library(const char *path);
 
 /* 建会话。`model_path` 是 `.onnx` 文件；失败返回 0 并把可读原因写进 `err`（保证 NUL 结尾）。
- * 会**逐项校验图的输入签名**（7 个输入的名字、元素类型、形状）与 `sa_model.h` 的常量相符 ——
+ * 会**逐项校验图的输入签名**（7 或 8 个输入的名字、元素类型、形状）与 `sa_model.h` 的常量相符 ——
  * 装错版本的图要在这里就响亮失败，而不是每帧算出一堆没意义的 logits。 */
 int sa_onnx_open(const char *model_path, char *err, int errcap);
 
 int sa_onnx_is_open(void);
+
+/* 装上的这张图有没有 `dir_held` 输入（图版本 3）= 它是不是在手部运动层下练出来的。
+ * 调用方据此决定默认开不开 `sa_motor`（旧图没见过运动层，硬加等于把模型废掉：
+ * 训练仓实测 J 在「至少保持 3 帧」下撑过 0.92 → 0.63）。会话没打开时返回 0。 */
+int sa_onnx_has_held(void);
 
 /* 静态输入缓冲。`OrtValue` 已经指向它，所以**原地填**、不要换指针。 */
 sa_model_in_t *sa_onnx_inputs(void);
