@@ -15,11 +15,11 @@
  * 玩家机器上恰好装了个稍旧的 onnxruntime.dll 时也不至于直接不认。 */
 #define SA_ONNX_MIN_API 11
 
-#define SA_ONNX_NINPUTS 8      /* 上限。版本 2 的图是前 7 个，版本 3 多一个 dir_held */
+#define SA_ONNX_NINPUTS 9      /* 上限。版本 2 的图是前 7 个，版本 3 多一个 dir_held，版本 4 再多一个 slow_held */
 #define SA_ONNX_NINPUTS_V2 7
 
 static const char *const IN_NAMES[SA_ONNX_NINPUTS] = {
-    "bullets", "bullets_mask", "enemies", "enemies_mask", "player", "target", "prev_action", "dir_held",
+    "bullets", "bullets_mask", "enemies", "enemies_mask", "player", "target", "prev_action", "dir_held", "slow_held",
 };
 static const char *const OUT_NAMES[1] = { "logits" };
 
@@ -66,6 +66,7 @@ static void spec_table(sa_in_spec_t s[SA_ONNX_NINPUTS])
         { F, { 2, 0 },                                       1, G_in.target,       sizeof G_in.target },
         { I, { 1, 0 },                                       1, G_in.prev_action,  sizeof G_in.prev_action },
         { I, { 1, 0 },                                       1, G_in.dir_held,     sizeof G_in.dir_held },
+        { I, { 1, 0 },                                       1, G_in.slow_held,    sizeof G_in.slow_held },
     };
     memcpy(s, t, sizeof t);
 }
@@ -208,8 +209,8 @@ static int check_signature(const sa_in_spec_t *specs, char *err, int errcap)
 
     if ((st = G.api->SessionGetInputCount(G.sess, &n)) != NULL)
         return ort_fail(st, err, errcap, "取输入个数失败");
-    if (n != SA_ONNX_NINPUTS_V2 && n != SA_ONNX_NINPUTS) {
-        snprintf(G_err, sizeof G_err, "图签名不符：图有 %d 个输入，应为 %d（图版本 2）或 %d（图版本 3，带 dir_held）",
+    if (n < SA_ONNX_NINPUTS_V2 || n > SA_ONNX_NINPUTS) {
+        snprintf(G_err, sizeof G_err, "图签名不符：图有 %d 个输入，应为 %d（图版本 2）到 %d（图版本 4）个",
                  (int)n, SA_ONNX_NINPUTS_V2, SA_ONNX_NINPUTS);
         return fail(err, errcap);
     }
@@ -263,7 +264,11 @@ int sa_onnx_is_open(void) { return G.open; }
 
 sa_model_in_t *sa_onnx_inputs(void) { return &G_in; }
 
-int sa_onnx_has_held(void) { return G.open && G.nin == SA_ONNX_NINPUTS; }
+int sa_onnx_has_held(void) { return G.open && G.nin > SA_ONNX_NINPUTS_V2; }
+
+int sa_onnx_has_slow_held(void) { return G.open && G.nin > SA_ONNX_NINPUTS_V2 + 1; }
+
+int sa_onnx_graph_version(void) { return G.open ? 2 + (int)(G.nin - SA_ONNX_NINPUTS_V2) : 0; }
 
 const char *sa_onnx_last_error(void) { return G_err; }
 

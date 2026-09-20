@@ -48,14 +48,14 @@ def dump(tmp_path_factory):
 def _read_dump(path):
     """按 dump_model_in.c 头部注释的顺序逐块读回来。"""
     raw = path.read_bytes()
-    head = struct.Struct("<2fqqii")
+    head = struct.Struct("<2fqqqii")
     per = (head.size + BULLET_ROWS * BULLET_COLS * 4 + BULLET_ROWS
            + ENEMY_ROWS * ENEMY_COLS * 4 + ENEMY_ROWS + PLAYER_COLS * 4)
     assert len(raw) % per == 0, f"文件大小 {len(raw)} 不是每帧 {per} 字节的整数倍"
     out = []
     for k in range(len(raw) // per):
         o = k * per
-        tx, ty, prev, held, nb, ne = head.unpack_from(raw, o)
+        tx, ty, prev, held, sheld, nb, ne = head.unpack_from(raw, o)
         o += head.size
 
         def take(count, dtype):
@@ -69,7 +69,7 @@ def _read_dump(path):
         enemies = take(ENEMY_ROWS * ENEMY_COLS, "<f4").reshape(ENEMY_ROWS, ENEMY_COLS)
         emask = take(ENEMY_ROWS, "u1").astype(bool)
         player = take(PLAYER_COLS, "<f4")
-        out.append({"target": (tx, ty), "prev_action": prev, "dir_held": held, "nb": nb, "ne": ne,
+        out.append({"target": (tx, ty), "prev_action": prev, "dir_held": held, "slow_held": sheld, "nb": nb, "ne": ne,
                     "bullets": bullets, "bullets_mask": bmask,
                     "enemies": enemies, "enemies_mask": emask, "player": player})
     return out
@@ -83,7 +83,9 @@ def test_python_fill_matches_c_fill(dump):
 
     track = TOOL.EnemyTrack()      # 整个序列共用一份：敌人速度是跨帧（= 跨场景）差分的
     for k, (fr, w) in enumerate(zip(frames, want)):
-        got = TOOL.fill_inputs(fr.obs, w["target"], int(w["prev_action"]), track, dir_held=int(w["dir_held"]))
+        got = TOOL.fill_inputs(fr.obs, w["target"], int(w["prev_action"]), track, dir_held=int(w["dir_held"]),
+                               slow_held=int(w["slow_held"]))
+        assert got["slow_held"][0] == w["slow_held"] == w["dir_held"] + 2
         assert got["dir_held"][0] == w["dir_held"] == ((1 << 20) if k == 5 else 1 + 3 * k)
         assert int(got["bullets_mask"].sum()) == w["nb"], f"场景 {k}：弹行数不符"
         assert int(got["enemies_mask"].sum()) == w["ne"], f"场景 {k}：敌行数不符"

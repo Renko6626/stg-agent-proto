@@ -57,6 +57,13 @@ int sa_onnx_is_open(void);
  * 训练仓实测 J 在「至少保持 3 帧」下撑过 0.92 → 0.63）。会话没打开时返回 0。 */
 int sa_onnx_has_held(void);
 
+/* 图有没有 `slow_held` 输入（图版本 4）= 它是不是在「低速键也过运动层」下练出来的（实验 N3 / M）。
+ * 调用方据此决定 `sa_motor_set_slow`：N2 的图没见过低速键被锁，硬锁要掉约 5pp。 */
+int sa_onnx_has_slow_held(void);
+
+/* 装上的图的版本：2 / 3 / 4（= 2 + held 输入的个数）。会话没打开时返回 0。 */
+int sa_onnx_graph_version(void);
+
 /* 静态输入缓冲。`OrtValue` 已经指向它，所以**原地填**、不要换指针。 */
 sa_model_in_t *sa_onnx_inputs(void);
 

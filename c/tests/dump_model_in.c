@@ -9,7 +9,7 @@
  * 口径分叉的（列序写反、包络边界差一、speed 取了 focus 档，都能各自自洽）。
  *
  * .bin 的格式：每帧顺序写下面几块，不写结构体本身（免得受 padding 影响）——
- *   float target[2] · int64 prev_action · int64 dir_held · int32 nb · int32 ne
+ *   float target[2] · int64 prev_action · int64 dir_held · int64 slow_held · int32 nb · int32 ne
  *   float bullets[640*5] · uint8 bullets_mask[640]
  *   float enemies[256*6] · uint8 enemies_mask[256] · float player[5]
  *
@@ -164,12 +164,12 @@ int main(int argc, char **argv)
         float ax, ay;
         int prev, id;
         sa_model_fill_t st;
-        int64_t prev64, held64;
+        int64_t prev64, held64, sheld64;
         int held = k == 5 ? (1 << 20) : 1 + 3 * k;   /* 1, 4, 7, …；场景 5 取「新局 = 很大」 */
         int32_t nb, ne;
 
         scenario(k, &ax, &ay, &prev);
-        st = sa_model_fill(&W, ax, ay, prev, held, &TRACK, &IN);
+        st = sa_model_fill(&W, ax, ay, prev, held, held + 2, &TRACK, &IN);
         /* ACT 里写「假设模型选了 prev」的按钮位：Python 侧不比这个，只用来让日志成形。 */
         id = prev;
         sa_log_frame(&W, sa_model_buttons(id), 0);
@@ -181,6 +181,8 @@ int main(int argc, char **argv)
         wr(bin, &prev64, sizeof prev64);
         held64 = IN.dir_held[0];
         wr(bin, &held64, sizeof held64);
+        sheld64 = IN.slow_held[0];
+        wr(bin, &sheld64, sizeof sheld64);
         wr(bin, &nb, sizeof nb);
         wr(bin, &ne, sizeof ne);
         wr(bin, IN.bullets, sizeof IN.bullets);

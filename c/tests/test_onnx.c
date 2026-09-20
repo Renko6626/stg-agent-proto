@@ -111,7 +111,7 @@ static void fill_a_frame(void)
     W.enemies[0].boss = 1; W.enemies[0].collidable = 1;
 
     in = sa_onnx_inputs();
-    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, NULL, in);
+    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, NULL, in);
 }
 
 static void test_live_follows_anchor(void);
@@ -169,7 +169,7 @@ static void put_player(float px, float py)
 static int dir_of(float tx, float ty)
 {
     const float *logits;
-    sa_model_fill(&W, tx, ty, 0, 1 << 20, NULL, sa_onnx_inputs());
+    sa_model_fill(&W, tx, ty, 0, 1 << 20, 1 << 20, NULL, sa_onnx_inputs());
     logits = sa_onnx_run();
     assert(logits != NULL);
     return sa_model_pick(logits, 0, 0.0f) / 2;   /* 只要方向，不管 slow */

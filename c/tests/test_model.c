@@ -39,7 +39,7 @@ static void test_player_and_scalars(void)
     sa_model_fill_t st;
     reset_world();
     W.player.focus = 1;
-    st = sa_model_fill(&W, -48.0f, 300.0f, 13, 1 << 20, NULL, &IN);
+    st = sa_model_fill(&W, -48.0f, 300.0f, 13, 1 << 20, 1 << 20, NULL, &IN);
     assert(st.bullets == 0 && st.enemies == 0 && st.bullets_dropped == 0);
     /* player 五列的顺序就是图签名：x, y, hit_radius, speed, focus */
     assert(IN.player[0] == 0.0f && IN.player[1] == 384.0f);
@@ -51,18 +51,18 @@ static void test_player_and_scalars(void)
     assert(IN.prev_action[0] == 13);
 
     W.player.focus = 0;
-    sa_model_fill(&W, 0.0f, 0.0f, 0, 1 << 20, NULL, &IN);
+    sa_model_fill(&W, 0.0f, 0.0f, 0, 1 << 20, 1 << 20, NULL, &IN);
     assert(IN.player[4] == 0.0f);
 }
 
 static void test_prev_action_is_clamped(void)
 {
     reset_world();
-    sa_model_fill(&W, 0.0f, 0.0f, -5, 1 << 20, NULL, &IN);
+    sa_model_fill(&W, 0.0f, 0.0f, -5, 1 << 20, 1 << 20, NULL, &IN);
     assert(IN.prev_action[0] == 0);
-    sa_model_fill(&W, 0.0f, 0.0f, 999, 1 << 20, NULL, &IN);
+    sa_model_fill(&W, 0.0f, 0.0f, 999, 1 << 20, 1 << 20, NULL, &IN);
     assert(IN.prev_action[0] == 0);
-    sa_model_fill(&W, 0.0f, 0.0f, SA_MODEL_ACTIONS - 1, 1 << 20, NULL, &IN);
+    sa_model_fill(&W, 0.0f, 0.0f, SA_MODEL_ACTIONS - 1, 1 << 20, 1 << 20, NULL, &IN);
     assert(IN.prev_action[0] == SA_MODEL_ACTIONS - 1);
 }
 
@@ -74,7 +74,7 @@ static void test_bullet_columns_and_compaction(void)
     put_bullet(1, -20.0f, 300.0f, 0.0f, 0.0f, 3.0f, 0);   /* 不参与碰撞 → 剔除 */
     put_bullet(2, -30.0f, 200.0f, -1.0f, 1.0f, 2.0f, 1);
     W.nbullets = 3;
-    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, NULL, &IN);
+    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, NULL, &IN);
     assert(st.bullets == 2 && st.bullets_dropped == 0);
     /* 弹五列：x, y, vx, vy, radius；剔除后向前压实 */
     assert(brow(0)[0] == 10.0f && brow(0)[1] == 340.0f && brow(0)[2] == 0.5f
@@ -100,7 +100,7 @@ static void test_envelope_filter_boundaries(void)
     put_bullet(6,  0.0f,   512.0f, 0, 0, 2.0f, 1);   /* 下边界上 → 留 */
     put_bullet(7,  0.0f,   512.5f, 0, 0, 2.0f, 1);   /* 越界     → 剔 */
     W.nbullets = 8;
-    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, NULL, &IN);
+    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, NULL, &IN);
     assert(st.bullets == 4);
     assert(brow(0)[0] == 256.0f && brow(1)[0] == -256.0f);
     assert(brow(2)[1] == -64.0f && brow(3)[1] == 512.0f);
@@ -112,7 +112,7 @@ static void test_bullet_rows_overflow_is_counted_not_overrun(void)
     reset_world();
     for (int i = 0; i < AP_MAX_BULLETS; i++) put_bullet(i, (float)(i % 100) - 50.0f, 200.0f, 0, 1.0f, 2.0f, 1);
     W.nbullets = AP_MAX_BULLETS;
-    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, NULL, &IN);
+    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, NULL, &IN);
     assert(st.bullets == SA_MODEL_BULLET_ROWS);
     assert(st.bullets_dropped == AP_MAX_BULLETS - SA_MODEL_BULLET_ROWS);
     assert(IN.bullets_mask[SA_MODEL_BULLET_ROWS - 1] == 1);
@@ -125,7 +125,7 @@ static void test_counts_out_of_range_are_clamped(void)
     put_bullet(0, 0.0f, 300.0f, 0, 1.0f, 2.0f, 1);
     W.nbullets = -7;                      /* 抽取器违约：不许据此越界读 */
     W.nenemies = AP_MAX_ENEMIES + 99;
-    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, NULL, &IN);
+    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, NULL, &IN);
     assert(st.bullets == 0);
     assert(st.enemies == 0);              /* 全是零行且 collidable = 0 → 一行都不留 */
 }
@@ -142,7 +142,7 @@ static void test_enemy_columns(void)
     W.enemies[2].x = 99.0f; W.enemies[2].y = 60.0f;
     W.enemies[2].hit_w = 8.0f; W.enemies[2].boss = 0; W.enemies[2].collidable = 1;
     W.nenemies = 3;
-    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, NULL, &IN);
+    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, NULL, &IN);
     assert(st.enemies == 2);
     /* 敌六列：x, y, hit_w, boss, vx, vy（不给 track → 速度恒 0） */
     assert(erow(0)[0] == 20.0f && erow(0)[1] == 80.0f && erow(0)[2] == 16.0f && erow(0)[3] == 1.0f);
@@ -173,7 +173,7 @@ static void test_enemy_velocity_by_id(void)
     put_enemy(0, 0, 10.0f, 50.0f, 1);      /* id 0 是合法 id（th06nc 的 id = 槽下标，0 号槽就是 0） */
     put_enemy(1, 7, -30.0f, 60.0f, 1);
     put_enemy(2, 9, 100.0f, 70.0f, 0);     /* 出生动画中：不进图，但要记下坐标 */
-    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, &T, &IN);
+    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, &T, &IN);
     assert(erow(0)[4] == 0.0f && erow(0)[5] == 0.0f && erow(1)[4] == 0.0f && erow(1)[5] == 0.0f);
 
     /* 第二帧：**换了行**（id 7 挪到第 0 行）也得按 id 对上，不能按行号差分 */
@@ -183,7 +183,7 @@ static void test_enemy_velocity_by_id(void)
     put_enemy(1, 0, 10.0f, 47.5f, 1);      /* (0, −2.5) */
     put_enemy(2, 9, 101.0f, 70.0f, 1);     /* 上一帧不可碰撞、这一帧可碰撞：照样有速度 (+1, 0) */
     put_enemy(3, 12, 0.0f, 0.0f, 1);       /* 新出现：0 */
-    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, &T, &IN);
+    st = sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, &T, &IN);
     assert(st.enemies == 4);
     assert(erow(0)[4] == 1.5f && erow(0)[5] == 3.0f);
     assert(erow(1)[4] == 0.0f && erow(1)[5] == -2.5f);
@@ -195,7 +195,7 @@ static void test_enemy_velocity_by_id(void)
     W.frame = 102;
     put_enemy(0, 7, -12.5f, 63.0f, 1);     /* dx = +16 → 留 */
     put_enemy(1, 0, 11.0f, 64.0f, 1);      /* dy = +16.5 → 整只记 0（dx = 1 也不留） */
-    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, &T, &IN);
+    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, &T, &IN);
     assert(erow(0)[4] == 16.0f && erow(0)[5] == 0.0f);
     assert(erow(1)[4] == 0.0f && erow(1)[5] == 0.0f);
 
@@ -203,12 +203,12 @@ static void test_enemy_velocity_by_id(void)
     reset_world();
     W.frame = 104;
     put_enemy(0, 7, -11.5f, 63.0f, 1);
-    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, &T, &IN);
+    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, &T, &IN);
     assert(erow(0)[4] == 0.0f);
     reset_world();
     W.frame = 105;
     put_enemy(0, 7, -10.5f, 64.0f, 1);
-    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, &T, &IN);
+    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, &T, &IN);
     assert(erow(0)[4] == 1.0f && erow(0)[5] == 1.0f);
 
     /* reset：帧号连续也不许差分（切模式 / 不可操作之后的第一帧） */
@@ -216,18 +216,18 @@ static void test_enemy_velocity_by_id(void)
     reset_world();
     W.frame = 106;
     put_enemy(0, 7, -9.5f, 65.0f, 1);
-    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, &T, &IN);
+    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, &T, &IN);
     assert(erow(0)[4] == 0.0f && erow(0)[5] == 0.0f);
 
     /* frame 回绕：0xFFFFFFFF → 0 算连续 */
     reset_world();
     W.frame = 0xFFFFFFFFu;
     put_enemy(0, 7, 0.0f, 0.0f, 1);
-    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, &T, &IN);
+    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, &T, &IN);
     reset_world();
     W.frame = 0;
     put_enemy(0, 7, 2.0f, 0.0f, 1);
-    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, &T, &IN);
+    sa_model_fill(&W, 0.0f, 384.0f, 0, 1 << 20, 1 << 20, &T, &IN);
     assert(erow(0)[4] == 2.0f);
 }
 

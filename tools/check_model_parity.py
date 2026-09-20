@@ -52,7 +52,8 @@ ENV_HALF_W, ENV_Y_MIN, ENV_Y_MAX = 256.0, -64.0, 512.0
 FIELD_HALF_W = 192.0
 ANCHOR_MARGIN = 16.0
 INPUT_NAMES = ("bullets", "bullets_mask", "enemies", "enemies_mask", "player", "target", "prev_action")
-HELD_INPUT = "dir_held"               # 只有图版本 3（手部运动层下练的模型）才有
+HELD_INPUT = "dir_held"               # 图版本 ≥ 3（手部运动层下练的模型）才有
+SLOW_HELD_INPUT = "slow_held"         # 图版本 4（低速键也过运动层：实验 N3 / M）才有
 HELD_NEVER = 1 << 20                  # = SA_MOTOR_HELD_NEVER
 
 BULLET_FLAG_COLLIDABLE = 0x01
@@ -173,15 +174,19 @@ def parse_motor(spec: str):
     if spec == "off":
         return None
     got = {"hold": (0, 0), "delay": (0, 0)}
+    slow = False
     for part in spec.split(";"):
         key, _, val = part.partition("=")
+        if key.strip() == "slow":
+            slow = val.strip() not in ("0", "false", "")
+            continue
         lo, hi = (int(v) for v in val.split(","))
         got[key.strip()] = (lo, hi)
-    return got["hold"][1], got["delay"][1]
+    return got["hold"][1], got["delay"][1], slow
 
 
 def fill_inputs(obs, target, prev_action: int, track: "EnemyTrack | None" = None,
-                dir_held: int = HELD_NEVER) -> dict:
+                dir_held: int = HELD_NEVER, slow_held: int = HELD_NEVER) -> dict:
     """OBS 的表 → 图的七个输入。与 c/sa_model.c 的 sa_model_fill **逐条同口径**。
 
     这是一份独立重写，不是抄 C 的结果 —— 两边各自算、对拍才有意义。
@@ -238,6 +243,7 @@ def fill_inputs(obs, target, prev_action: int, track: "EnemyTrack | None" = None
         "target": np.asarray(target, dtype=np.float32),
         "prev_action": np.array([max(0, min(NUM_ACTIONS - 1, int(prev_action)))], dtype=np.int64),
         HELD_INPUT: np.array([max(0, int(dir_held))], dtype=np.int64),
+        SLOW_HELD_INPUT: np.array([max(0, int(slow_held))], dtype=np.int64),
     }
 
 
@@ -246,12 +252,13 @@ def check_signature(sess) -> list:
     want = {
         "bullets": (BULLET_ROWS, BULLET_COLS), "bullets_mask": (BULLET_ROWS,),
         "enemies": (ENEMY_ROWS, ENEMY_COLS), "enemies_mask": (ENEMY_ROWS,),
-        "player": (PLAYER_COLS,), "target": (2,), "prev_action": (1,), HELD_INPUT: (1,),
+        "player": (PLAYER_COLS,), "target": (2,), "prev_action": (1,), HELD_INPUT: (1,), SLOW_HELD_INPUT: (1,),
     }
     bad = []
     got = {i.name: tuple(i.shape) for i in sess.get_inputs()}
-    if tuple(got) not in (INPUT_NAMES, INPUT_NAMES + (HELD_INPUT,)):
-        bad.append(f"输入名/顺序是 {tuple(got)}，应为 {INPUT_NAMES}（图版本 2）或再加 {HELD_INPUT}（图版本 3）")
+    if tuple(got) not in (INPUT_NAMES, INPUT_NAMES + (HELD_INPUT,), INPUT_NAMES + (HELD_INPUT, SLOW_HELD_INPUT)):
+        bad.append(f"输入名/顺序是 {tuple(got)}，应为 {INPUT_NAMES}（图版本 2），"
+                   f"或再加 {HELD_INPUT}（版本 3）、再加 {SLOW_HELD_INPUT}（版本 4）")
     for name, shape in want.items():
         if name in got and got[name] != shape:
             bad.append(f"输入 {name} 形状是 {got[name]}，应为 {shape}")
@@ -271,7 +278,7 @@ def main(argv=None) -> int:
     ap.add_argument("--eps", type=float, default=1e-3,
                     help="不一致帧允许的 top-2 logit 差上限：小于它算浮点近平局，不算分歧")
     ap.add_argument("--motor", default="off",
-                    help="录制时 DLL 的手部运动层：off（严格逐帧比）/ hold=a,b[;delay=c,d]（与 ini 一致）。"
+                    help="录制时 DLL 的手部运动层：off（严格逐帧比）/ hold=a,b[;delay=c,d][;slow=1]（与 ini 一致）。"
                          "开着运动层时日志里只有**执行的**动作、没有模型**想按的**，方向分歧只能判「运动层解释得了 / 解释不了」；"
                          "要严格对拍请用 motor = 0 录")
     ap.add_argument("--max-report", type=int, default=20)
@@ -299,8 +306,8 @@ def main(argv=None) -> int:
 
     names = tuple(i.name for i in sess.get_inputs())
     motor = parse_motor(a.motor)
-    print(f"图版本 {'3（带 dir_held）' if HELD_INPUT in names else '2'} · 运动层 {a.motor}")
-    prev_action, held = 0, HELD_NEVER
+    print(f"图版本 {2 + len(names) - len(INPUT_NAMES)} · 运动层 {a.motor}")
+    prev_action, held, slow_held = 0, HELD_NEVER, HELD_NEVER
     explained = run_len = 0
     run_want = -1
     track = EnemyTrack()
@@ -316,14 +323,14 @@ def main(argv=None) -> int:
         # DLL 没接管的帧（回放 / 不可操作 / MANUAL）：它同时把 prev_action 清了，这里照做。
         if (flags & (ACT_PASSTHROUGH | ACT_HUMAN)) or (fr.obs.phase & PHASE_REPLAY_PLAYBACK) \
                 or not (fr.obs.phase & PHASE_PLAYER_CONTROLLABLE):
-            prev_action, held = 0, HELD_NEVER
+            prev_action, held, slow_held = 0, HELD_NEVER, HELD_NEVER
             run_len, run_want = 0, -1
             track.reset()          # DLL 的 ap_policy_model_reset 连敌人速度的跨帧状态一起清
             skipped += 1
             continue
 
         target = anchor(fr.obs, a.anchor, a.anchor_x, a.anchor_y)
-        feed = fill_inputs(fr.obs, target, prev_action, track, dir_held=held)
+        feed = fill_inputs(fr.obs, target, prev_action, track, dir_held=held, slow_held=slow_held)
         logits = sess.run(["logits"], {k: feed[k] for k in names})[0].astype(np.float64)
         action_id = pick(logits, prev_action, a.hysteresis)
         want = action_buttons(action_id)
@@ -336,7 +343,10 @@ def main(argv=None) -> int:
         buttons &= ~BTN_BOMB
         logged = buttons_to_action(buttons)
         by_motor = False
-        if motor is not None and want != buttons and logged is not None and logged % 2 == action_id % 2:
+        if motor is not None and motor[2] and want != buttons and logged is not None \
+                and logged // 2 == action_id // 2 and logged % 2 == prev_action % 2 and slow_held < motor[0] + motor[1]:
+            by_motor = True          # 方向一致、低速位没换成想要的：低速那一路还锁着 / 还在延迟里（slow=1 才可能）
+        elif motor is not None and want != buttons and logged is not None and logged % 2 == action_id % 2:
             # 低速位一致、只有方向不同：运动层可能把变向挡住了。解释得了的条件（保守）：
             # 这一段还没执行满最长的最短保持，或者同一个意图被延迟的帧数还在延迟上界之内。
             run_len = run_len + 1 if run_want == action_id // 2 else 1
@@ -364,6 +374,7 @@ def main(argv=None) -> int:
             uninvertible += 1
             logged_id = action_id        # 反推不出来只能退回重算值
         held = next_held(prev_action, logged_id, held)
+        slow_held = 1 if prev_action % 2 != logged_id % 2 else min(slow_held + 1, HELD_NEVER)
         prev_action = logged_id
 
     print(f"比对 {compared} 帧 · 跳过 {skipped} 帧（未接管/无 ACT）")

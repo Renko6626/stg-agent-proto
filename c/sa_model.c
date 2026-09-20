@@ -44,7 +44,8 @@ static int track_find(const sa_model_track_t *t, int hint, uint32_t id)
 static float fabs_f(float v) { return v < 0.0f ? -v : v; }
 
 sa_model_fill_t sa_model_fill(const ap_world_t *w, float target_x, float target_y,
-                              int prev_action, int dir_held, sa_model_track_t *track, sa_model_in_t *in)
+                              int prev_action, int dir_held, int slow_held,
+                              sa_model_track_t *track, sa_model_in_t *in)
 {
     sa_model_fill_t st;
     int i, nb, ne, row, have_prev;
@@ -64,6 +65,7 @@ sa_model_fill_t sa_model_fill(const ap_world_t *w, float target_x, float target_
     in->target[1] = target_y;
     in->prev_action[0] = (prev_action >= 0 && prev_action < SA_MODEL_ACTIONS) ? prev_action : 0;
     in->dir_held[0] = dir_held > 0 ? dir_held : 0;
+    in->slow_held[0] = slow_held > 0 ? slow_held : 0;
 
     nb = clamp_count(w->nbullets, AP_MAX_BULLETS);
     for (i = 0, row = 0; i < nb; i++) {

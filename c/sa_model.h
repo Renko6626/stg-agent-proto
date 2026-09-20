@@ -14,6 +14,9 @@
  * 版本 2 的七输入图照样能装（`sa_onnx_has_held()` 说的是装上的这张图属于哪一种）。
  * 版本 3 的图里，`prev_action` 的含义是上一步**实际执行**的动作（运动层之后的），不是策略想按的。
  *
+ * **图版本 4（2026-09-21）**：再多一个输入 `slow_held i64[1]` = 当前低速位（按着 / 松着）已经实际执行了多少帧
+ * （danger_topk_v5，实验 N3 / M：低速键也过运动层）。图版本 = 2 + held 输入的个数，三种图 `sa_onnx` 都收。
+ *
  * 设计与决策记录：renkolab `docs/superpowers/specs/2026-09-18-th06nc-onnx-policy-design.md`。
  * 特征化（topk / 密度图 / 归一化）**不在这里** —— 它在图里（那份设计的 D2），本文件只填原始表。 */
 #ifndef SA_MODEL_H
@@ -21,7 +24,7 @@
 #include <stdint.h>
 #include "world.h"
 
-#define SA_MODEL_GRAPH_VERSION 3     /* 同时兼容版本 2（七输入） */
+#define SA_MODEL_GRAPH_VERSION 4     /* 同时兼容版本 2（七输入）与 3（八输入） */
 
 /* 图签名。行数是各池容量上限，列序见下面每个字段的注释。 */
 #define SA_MODEL_BULLET_ROWS 640
@@ -52,7 +55,8 @@ typedef struct {
     float   player[SA_MODEL_PLAYER_COLS];                           /* "player"       f32[5]     */
     float   target[2];                                              /* "target"       f32[2]     */
     int64_t prev_action[1];                                         /* "prev_action"  i64[1]     */
-    int64_t dir_held[1];                                            /* "dir_held"     i64[1]，仅图版本 3 */
+    int64_t dir_held[1];                                            /* "dir_held"     i64[1]，图版本 ≥ 3 */
+    int64_t slow_held[1];                                           /* "slow_held"    i64[1]，图版本 4   */
 } sa_model_in_t;
 
 /* 敌人速度差分用的跨帧状态：上一次 `sa_model_fill` 看到的全部敌人（不论 collidable）。
@@ -78,8 +82,8 @@ typedef struct {
 /* 把一帧世界摊成图的输入。`target_*` 是锚点（协议坐标），`prev_action` 是上一步动作 id
  * （0–17，非法值按 0 处理）。未用行清零。`w->n*` 越界时按 [0, AP_MAX_*] 钳，不据此越界读。
  *
- * `dir_held` 是当前方向已实际执行的帧数（新局 = `SA_MOTOR_HELD_NEVER`；负数按 0）。版本 2 的图没有这个输入，
- * 填了也没人读，所以调用方不必区分。
+ * `dir_held` / `slow_held` 是当前方向 / 低速位已实际执行的帧数（新局 = `SA_MOTOR_HELD_NEVER`；负数按 0）。
+ * 低版本的图没有这些输入，填了也没人读，所以调用方不必区分。
  *
  * `track` 是敌人速度的跨帧状态，本函数读完就地更新成本帧；传 `NULL` 则速度两列恒 0
  * （只给不关心速度的测试用 —— 真部署传 NULL 等于把 v3 的图喂成瞎子）。速度的口径：
@@ -87,7 +91,8 @@ typedef struct {
  *   - 上一帧必须恰好是 `w->frame − 1`，否则全部记 0；
  *   - 任一轴位移 > `SA_MODEL_TELEPORT_PX` 记 0。 */
 sa_model_fill_t sa_model_fill(const ap_world_t *w, float target_x, float target_y,
-                              int prev_action, int dir_held, sa_model_track_t *track, sa_model_in_t *in);
+                              int prev_action, int dir_held, int slow_held,
+                              sa_model_track_t *track, sa_model_in_t *in);
 
 /* 动作 id → 动作位（`AP_BTN_*`）。SHOT 恒按、BOMB 永不置位（动作表 v1 屏蔽了它）。
  * 非法 id 退成「不动 + 射击」。 */

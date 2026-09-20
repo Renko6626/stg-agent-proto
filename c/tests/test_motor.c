@@ -8,18 +8,19 @@
 #include <string.h>
 #include "../sa_motor.h"
 
-typedef struct { sa_motor_t m; int prev, held; } hand_t;
+typedef struct { sa_motor_t m; int prev, held, slow_held; } hand_t;
 
 static void hand(hand_t *h, int hl, int hh, int dl, int dh, uint32_t seed)
 {
     sa_motor_init(&h->m, hl, hh, dl, dh, seed);
-    h->prev = 0; h->held = SA_MOTOR_HELD_NEVER;
+    h->prev = 0; h->held = h->slow_held = SA_MOTOR_HELD_NEVER;
 }
 
 static int step(hand_t *h, int want)
 {
-    int out = sa_motor_apply(&h->m, want, h->prev, h->held);
+    int out = sa_motor_apply(&h->m, want, h->prev, h->held, h->slow_held);
     h->held = sa_motor_next_held(h->prev, out, h->held);
+    h->slow_held = sa_motor_next_slow_held(h->prev, out, h->slow_held);
     h->prev = out;
     return out;
 }
@@ -70,7 +71,7 @@ int main(void)
     hand(&h, 9, 9, 0, 0, 1);
     step(&h, 6);
     assert(step(&h, 14) / 2 == 3);                 /* 被锁着 */
-    sa_motor_reset(&h.m); h.prev = 0; h.held = SA_MOTOR_HELD_NEVER;
+    sa_motor_reset(&h.m); h.prev = 0; h.held = h.slow_held = SA_MOTOR_HELD_NEVER;
     assert(step(&h, 14) / 2 == 7);
 
     /* 段长随机：落在 [2, 6]、两端都取得到、五个取值都有相当的份额 */
@@ -79,7 +80,7 @@ int main(void)
         hand_t r; hand(&r, 2, 6, 0, 0, 12345);
         for (int k = 0; k < n; k++) {
             int len = 0;
-            sa_motor_reset(&r.m); r.prev = 0; r.held = SA_MOTOR_HELD_NEVER;
+            sa_motor_reset(&r.m); r.prev = 0; r.held = r.slow_held = SA_MOTOR_HELD_NEVER;
             step(&r, 6);                           /* 换到方向 3，抽一个 L */
             for (int t = 1; t < 10; t++) { if (step(&r, 14) / 2 == 7) { len = t; break; } }
             assert(len >= 2 && len <= 6);
@@ -118,6 +119,48 @@ int main(void)
             assert(sa_motor_draw(12345, 0, t, SA_MOTOR_STREAM_DELAY, 0, 2) == DELAY[t]);
         }
         assert(sa_motor_draw(1, 0, 7, 0, 5, 5) == 5);
+        /* 低速位那两路（stream 2 / 3） */
+        static const int SHOLD[12]  = {6, 5, 6, 5, 5, 5, 3, 2, 4, 5, 4, 5};
+        static const int SDELAY[12] = {1, 1, 2, 1, 2, 0, 1, 0, 2, 0, 1, 0};
+        for (uint32_t t = 0; t < 12; t++) {
+            assert(sa_motor_draw(12345, 0, t, SA_MOTOR_STREAM_SLOW_HOLD, 2, 6) == SHOLD[t]);
+            assert(sa_motor_draw(12345, 0, t, SA_MOTOR_STREAM_SLOW_DELAY, 0, 2) == SDELAY[t]);
+        }
+    }
+
+    /* ---- N3：低速位也过运动层（场景与训练仓 tests/test_motor.py 的 N3 一节一一对应）---- */
+    hand(&h, 3, 3, 0, 0, 1); sa_motor_set_slow(&h.m, 1);
+    /* 方向一直是 3；低速：按下（第一下放行）→ 想松被锁两帧 → 第 4 帧放行 */
+    assert(step(&h, 7) == 7 && step(&h, 6) == 7 && step(&h, 6) == 7 && step(&h, 6) == 6 && step(&h, 6) == 6);
+
+    /* 两路互不牵连：方向刚换被锁着，不妨碍低速键立刻按下；反过来也一样 */
+    hand(&h, 4, 4, 0, 0, 1); sa_motor_set_slow(&h.m, 1);
+    assert(step(&h, 3 * 2 + 1) == 7 && step(&h, 7 * 2 + 0) == 7);      /* 两路都想换，两路都被锁 */
+    hand(&h, 4, 4, 0, 0, 1); sa_motor_set_slow(&h.m, 1);
+    step(&h, 3 * 2);
+    assert(step(&h, 3 * 2 + 1) == 7);                                  /* 低速位没动过 → 它那一路仍是第一下 */
+    assert(step(&h, 7 * 2 + 1) == 7);                                  /* 方向还在自己的锁里 */
+
+    /* 低速位的延迟与撤回 */
+    hand(&h, 0, 0, 2, 2, 1); sa_motor_set_slow(&h.m, 1);
+    assert(step(&h, 1) % 2 == 0 && step(&h, 1) % 2 == 0 && step(&h, 1) % 2 == 1 && step(&h, 1) % 2 == 1);
+    hand(&h, 0, 0, 2, 2, 1); sa_motor_set_slow(&h.m, 1);
+    assert(step(&h, 1) % 2 == 0 && step(&h, 0) % 2 == 0 && step(&h, 1) % 2 == 0 && step(&h, 1) % 2 == 0 && step(&h, 1) % 2 == 1);
+
+    /* 开不开低速那一路，方向这一路逐位不变；开了之后乱按的低速位大部分时候被挡、且没有短于 2 帧的低速段 */
+    {
+        hand_t a, b; hand(&a, 2, 6, 0, 2, 5); hand(&b, 2, 6, 0, 2, 5); sa_motor_set_slow(&b.m, 1);
+        uint32_t x = 3; int blocked = 0, run = 99, prev_slow = 0, shortest = 99;
+        for (int k = 0; k < 20000; k++) {
+            x = x * 1664525u + 1013904223u;
+            int w = (int)((x >> 8) % 18), oa = step(&a, w), ob = step(&b, w);
+            assert(oa / 2 == ob / 2);
+            assert(oa % 2 == w % 2);
+            blocked += (ob % 2) != (w % 2);
+            if (ob % 2 != prev_slow) { if (run < shortest) shortest = run; run = 1; } else run++;
+            prev_slow = ob % 2;
+        }
+        assert(blocked > 5000 && shortest >= 2);
     }
 
     /* 非法参数与非法 id */

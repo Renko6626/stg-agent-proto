@@ -27,45 +27,60 @@ void sa_motor_init(sa_motor_t *m, int hold_lo, int hold_hi, int delay_lo, int de
     if (delay_lo < 0 || delay_hi < delay_lo) delay_lo = delay_hi = 0;
     m->hold_lo = hold_lo; m->hold_hi = hold_hi;
     m->delay_lo = delay_lo; m->delay_hi = delay_hi;
+    m->slow = 0;
     m->seed = seed;
     m->t = 0;
     sa_motor_reset(m);
 }
 
+void sa_motor_set_slow(sa_motor_t *m, int on) { m->slow = on ? 1 : 0; }
+
+static void chan_reset(sa_motor_chan_t *c) { c->need = 0; c->pend = -1; c->wait = 0; }
+
 void sa_motor_reset(sa_motor_t *m)
 {
-    m->need = 0;
-    m->pend = -1;
-    m->wait = 0;
+    chan_reset(&m->dir);
+    chan_reset(&m->slw);
 }
 
-int sa_motor_apply(sa_motor_t *m, int want, int prev_exec, int held)
+/* 一路通道走一帧：想要 want、正在执行 cur（已执行 held 帧）。返回本帧实际执行的取值。
+ * = 训练仓 MotorLayer._channel，逐条同义。 */
+static int chan_step(sa_motor_chan_t *c, int want, int cur, int held, int hold_draw, int delay_draw)
 {
-    int want_dir, slow, cur, diff, go, hold_draw, delay_draw;
-    /* 与训练侧一样：每步两路各抽一个，用不用得上都消耗一个计数 —— 抽样值因此与「哪几步真发生了变向」无关 */
-    hold_draw  = sa_motor_draw(m->seed, 0, m->t, SA_MOTOR_STREAM_HOLD,  m->hold_lo,  m->hold_hi);
-    delay_draw = sa_motor_draw(m->seed, 0, m->t, SA_MOTOR_STREAM_DELAY, m->delay_lo, m->delay_hi);
-    m->t++;
+    int diff = want != cur, go;
+    if (diff && want != c->pend) c->wait = delay_draw;   /* 新意图（或改了主意）→ 重抽延迟 */
+    go = diff && c->wait <= 0 && held >= c->need;
+    if (diff && !go && c->wait > 0) c->wait--;
+    if (go) c->need = hold_draw;
+    c->pend = (diff && !go) ? want : -1;                 /* 想回当前取值 = 撤销；放行了也清掉 */
+    return go ? want : cur;
+}
+
+int sa_motor_apply(sa_motor_t *m, int want, int prev_exec, int held, int slow_held)
+{
+    uint32_t t = m->t++;     /* 抽样值只由 (seed, t, stream) 决定，与「哪几步真发生了变向」无关 */
+    int dir, slow;
     if (want < 0 || want >= SA_MOTOR_ACTIONS) want = 0;
     if (prev_exec < 0 || prev_exec >= SA_MOTOR_ACTIONS) prev_exec = 0;
-    want_dir = want / 2; slow = want % 2; cur = prev_exec / 2;
-    diff = want_dir != cur;
-
-    if (diff && want_dir != m->pend)                 /* 新意图（或改了主意）→ 重抽延迟 */
-        m->wait = delay_draw;
-    m->pend = diff ? want_dir : -1;                  /* 想回当前方向 = 撤销 */
-
-    go = diff && m->wait <= 0 && held >= m->need;
-    if (diff && !go && m->wait > 0) m->wait--;
-    if (go) {
-        m->need = hold_draw;
-        m->pend = -1;
-    }
-    return (go ? want_dir : cur) * 2 + slow;
+    dir = chan_step(&m->dir, want / 2, prev_exec / 2, held,
+                    sa_motor_draw(m->seed, 0, t, SA_MOTOR_STREAM_HOLD,  m->hold_lo,  m->hold_hi),
+                    sa_motor_draw(m->seed, 0, t, SA_MOTOR_STREAM_DELAY, m->delay_lo, m->delay_hi));
+    slow = want % 2;
+    if (m->slow)
+        slow = chan_step(&m->slw, slow, prev_exec % 2, slow_held,
+                         sa_motor_draw(m->seed, 0, t, SA_MOTOR_STREAM_SLOW_HOLD,  m->hold_lo,  m->hold_hi),
+                         sa_motor_draw(m->seed, 0, t, SA_MOTOR_STREAM_SLOW_DELAY, m->delay_lo, m->delay_hi));
+    return dir * 2 + slow;
 }
 
 int sa_motor_next_held(int prev_exec, int exec, int held)
 {
     if (prev_exec / 2 != exec / 2) return 1;
     return held >= SA_MOTOR_HELD_NEVER ? SA_MOTOR_HELD_NEVER : held + 1;
+}
+
+int sa_motor_next_slow_held(int prev_exec, int exec, int slow_held)
+{
+    if (prev_exec % 2 != exec % 2) return 1;
+    return slow_held >= SA_MOTOR_HELD_NEVER ? SA_MOTOR_HELD_NEVER : slow_held + 1;
 }
