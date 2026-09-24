@@ -17,7 +17,8 @@ static const sa_field_t BF[] = {
     {"radius","fx",B_RADIUS},{"flags","u8",B_FLAGS},{"state","u8",B_STATE},{"type","u16",B_TYPE} };
 static const sa_field_t EF[] = {
     {"x","fx",E_X},{"y","fx",E_Y},{"hurt_w","fx",E_HURT_W},{"hurt_h","fx",E_HURT_H},{"hit_w","fx",E_HIT_W},{"hit_h","fx",E_HIT_H},
-    {"hp","i32",E_HP},{"hp_max","i32",E_HP_MAX},{"flags","u16",E_FLAGS},{"id","u32",E_ID} };
+    {"hp","i32",E_HP},{"hp_max","i32",E_HP_MAX},{"flags","u16",E_FLAGS},{"id","u32",E_ID},
+    {"vx","fx",E_VX},{"vy","fx",E_VY} };
 static const sa_field_t LF[] = {
     {"x","fx",L_X},{"y","fx",L_Y},{"angle","angle",L_ANGLE},{"start","fx",L_START},{"end","fx",L_END},{"start_len","fx",L_START_LEN},
     {"speed","fx",L_SPEED},{"half_h","fx",L_HALF_H},{"omega","fx",L_OMEGA},{"vx","fx",L_VX},{"vy","fx",L_VY},
@@ -148,6 +149,8 @@ int sa_obs_encode(const ap_world_t *w, uint8_t *out, int cap)
         le32(r + E_HP, (uint32_t)e->hp); le32(r + E_HP_MAX, (uint32_t)e->hp_max);
         le16(r + E_FLAGS, (uint16_t)((e->boss ? 1 : 0) | (e->collidable ? 0x10 : 0)));
         le32(r + E_ID, e->id);   /* 后端给的稳定标识，不是行号 */
+        put_fx(r, E_VX, 0.0f); put_fx(r, E_VY, 0.0f);
+        /* vx/vy：部署侧速度仍由 sa_model.c 按 id 差分，见 stg-engine docs/follow-ups.md D25 */
     }
     p = r;
 

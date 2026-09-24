@@ -29,6 +29,9 @@ int main(void)
     /* HELLO 里要有 items 表，且 kind/flags 是 u8 */
     assert(strstr(js, "{\"id\":5,\"name\":\"items\",\"cap\":1024,\"stride\":18,"));
     assert(strstr(js, "{\"name\":\"kind\",\"type\":\"u8\",\"off\":16}"));
+    /* 引擎第二刀：enemies stride 38→46，末尾追加 vx/vy（Fx，38/42） */
+    assert(strstr(js, "{\"id\":3,\"name\":\"enemies\",\"cap\":256,\"stride\":46,"));
+    assert(strstr(js, "{\"name\":\"vx\",\"type\":\"fx\",\"off\":38},{\"name\":\"vy\",\"type\":\"fx\",\"off\":42}"));
     assert(sa_hello_json(&d, js, 64) == -1);
 
     /* OBS：1 弹 1 敌 1 激光 */
@@ -48,7 +51,7 @@ int main(void)
     w.items[0].kind = AP_ITEM_LIFE; w.items[0].homing = 1; w.items[0].spawning = 0;
 
     n = sa_obs_encode(&w, buf, sizeof buf);
-    assert(n == 9 + (3 + 36) + (3 + 30) + (3 + 38) + (3 + 48) + (3 + 18));
+    assert(n == 9 + (3 + 36) + (3 + 30) + (3 + 46) + (3 + 48) + (3 + 18));
     assert(rd32(buf) == 42 && rd32(buf + 4) == 0x41 && buf[8] == 5);
     assert(buf[9] == 1 && rd16(buf + 10) == 1);
     assert((int32_t)rd32(buf + 12) == -184 * 65536 && buf[12 + 22] == 3 && rd16(buf + 12 + 26) == 128 && rd32(buf + 12 + 28) == 123456);
@@ -59,19 +62,23 @@ int main(void)
     assert(buf[81] == 3 && rd16(buf + 82) == 1);
     assert((int32_t)rd32(buf + 84 + 8) == 16 * 65536 && (int32_t)rd32(buf + 84 + 24) == 500);
     assert(rd16(buf + 84 + 32) == 0x11 && rd32(buf + 84 + 34) == 4242);
-    assert(buf[122] == 4 && rd16(buf + 123) == 1);
-    assert(rd16(buf + 125 + 8) == 16384 && (int32_t)rd32(buf + 125 + 14) == 200 * 65536);
-    assert((int32_t)rd32(buf + 125 + 30) == 32768 && (int32_t)rd32(buf + 125 + 34) == -98304   /* omega 0.5、vx −1.5 */
-           && (int32_t)rd32(buf + 125 + 38) == 131072 && (int32_t)rd32(buf + 125 + 42) == 30);
+    /* vx/vy（引擎第二刀 SPEC 追加，stride 38→46）：部署侧速度仍由 sa_model.c 按 id 差分，
+     * C 编码器暂写 0（D25）。 */
+    assert((int32_t)rd32(buf + 84 + 38) == 0 && (int32_t)rd32(buf + 84 + 42) == 0);
+    /* enemies 行 84..130（stride 46）→ lasers 表头 130，行从 133 */
+    assert(buf[130] == 4 && rd16(buf + 131) == 1);
+    assert(rd16(buf + 133 + 8) == 16384 && (int32_t)rd32(buf + 133 + 14) == 200 * 65536);
+    assert((int32_t)rd32(buf + 133 + 30) == 32768 && (int32_t)rd32(buf + 133 + 34) == -98304   /* omega 0.5、vx −1.5 */
+           && (int32_t)rd32(buf + 133 + 38) == 131072 && (int32_t)rd32(buf + 133 + 42) == 30);
     assert(sa_obs_encode(&w, buf, 100) == -1);
 
-    /* items：lasers 行 125..172 → 表头 173，行从 176 */
-    assert(buf[173] == 5 && rd16(buf + 174) == 1);
-    assert((int32_t)rd32(buf + 176 + 0) == -100 * 65536 - 32768);      /* -100.5 */
-    assert((int32_t)rd32(buf + 176 + 4) == 64 * 65536 + 16384);        /*  64.25 */
-    assert((int32_t)rd32(buf + 176 + 8) == 32768);                     /*   0.5  */
-    assert((int32_t)rd32(buf + 176 + 12) == -147456);                  /*  -2.25 */
-    assert(buf[176 + 16] == AP_ITEM_LIFE && buf[176 + 17] == 0x01);    /* kind + homing 位 */
+    /* items：lasers 行 133..181 → 表头 181，行从 184 */
+    assert(buf[181] == 5 && rd16(buf + 182) == 1);
+    assert((int32_t)rd32(buf + 184 + 0) == -100 * 65536 - 32768);      /* -100.5 */
+    assert((int32_t)rd32(buf + 184 + 4) == 64 * 65536 + 16384);        /*  64.25 */
+    assert((int32_t)rd32(buf + 184 + 8) == 32768);                     /*   0.5  */
+    assert((int32_t)rd32(buf + 184 + 12) == -147456);                  /*  -2.25 */
+    assert(buf[184 + 16] == AP_ITEM_LIFE && buf[184 + 17] == 0x01);    /* kind + homing 位 */
 
     /* ACT + 封帧 */
     uint8_t a[12]; sa_act_t act;
